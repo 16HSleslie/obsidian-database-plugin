@@ -1,8 +1,752 @@
-/*
+/* SQLite Plugin Styles */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+/* Main container for query results */
+.sqlite-query-result {
+    margin: 1em 0;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+    overflow: hidden;
+}
 
-If your plugin does not need CSS, delete this file.
+/* Metadata header */
+.sqlite-query-metadata {
+    padding: 0.5em 1em;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+    font-size: 0.85em;
+    color: var(--text-muted);
+}
 
-*/
+.sqlite-metadata-text {
+    font-family: var(--font-monospace);
+}
+
+/* Table styling */
+.sqlite-table-wrapper {
+    max-height: 400px;
+    overflow: auto;
+    border-radius: 0 0 var(--radius-s) var(--radius-s);
+}
+
+.sqlite-result-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+
+.sqlite-table-header {
+    background: var(--background-secondary);
+    padding: 0.5em 0.75em;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid var(--background-modifier-border);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.sqlite-table-cell {
+    padding: 0.5em 0.75em;
+    border-bottom: 1px solid var(--background-modifier-border);
+    vertical-align: top;
+    max-width: 300px;
+    word-wrap: break-word;
+}
+
+.sqlite-table-row-even {
+    background: var(--background-primary);
+}
+
+.sqlite-table-row-odd {
+    background: var(--background-primary-alt);
+}
+
+.sqlite-table-row-even:hover,
+.sqlite-table-row-odd:hover {
+    background: var(--background-modifier-hover);
+}
+
+/* Cell value styling */
+.sqlite-cell-null {
+    color: var(--text-muted);
+    font-style: italic;
+    opacity: 0.7;
+}
+
+.sqlite-cell-number {
+    color: var(--color-blue);
+    font-family: var(--font-monospace);
+    text-align: right;
+    display: block;
+}
+
+.sqlite-cell-boolean {
+    color: var(--color-purple);
+    font-family: var(--font-monospace);
+}
+
+.sqlite-cell-date {
+    color: var(--color-green);
+    font-family: var(--font-monospace);
+}
+
+.sqlite-cell-text {
+    color: var(--text-normal);
+}
+
+.sqlite-cell-link {
+    color: var(--link-color);
+    text-decoration: none;
+}
+
+.sqlite-cell-link:hover {
+    text-decoration: underline;
+}
+
+/* Empty result styling */
+.sqlite-empty-result {
+    padding: 2em;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.sqlite-empty-icon {
+    font-size: 2em;
+    margin-bottom: 0.5em;
+}
+
+.sqlite-empty-message {
+    font-style: italic;
+}
+
+/* Error styling */
+.sqlite-query-error {
+    margin: 1em 0;
+    border: 1px solid var(--color-red);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+    overflow: hidden;
+}
+
+.sqlite-error-header {
+    background: var(--color-red);
+    color: white;
+    padding: 0.75em 1em;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.sqlite-error-icon {
+    font-size: 1.2em;
+}
+
+.sqlite-error-title {
+    font-weight: 600;
+}
+
+.sqlite-error-message {
+    padding: 1em;
+}
+
+.sqlite-error-text {
+    color: var(--text-error);
+    font-weight: 500;
+    margin-bottom: 1em;
+}
+
+.sqlite-error-query {
+    margin-top: 1em;
+    padding-top: 1em;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.sqlite-error-query-label {
+    font-weight: 600;
+    margin-bottom: 0.5em;
+    color: var(--text-muted);
+}
+
+.sqlite-error-query-code {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: 0.75em;
+    margin: 0;
+    overflow-x: auto;
+}
+
+.sqlite-error-query-code code {
+    background: none;
+    padding: 0;
+    font-family: var(--font-monospace);
+    color: var(--text-normal);
+}
+
+/* Error help section */
+.sqlite-error-help {
+    margin-top: 1em;
+    padding-top: 1em;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.sqlite-help-title {
+    font-weight: 600;
+    margin-bottom: 0.5em;
+    color: var(--text-normal);
+}
+
+.sqlite-help-list {
+    margin: 0;
+    padding-left: 1.5em;
+}
+
+.sqlite-help-item {
+    margin-bottom: 0.5em;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* Footer styling */
+.sqlite-query-footer {
+    padding: 0.5em 1em;
+    background: var(--background-secondary);
+    border-top: 1px solid var(--background-modifier-border);
+    font-size: 0.8em;
+}
+
+.sqlite-footer-text {
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+}
+
+/* Truncation warning */
+.sqlite-truncation-warning {
+    padding: 0.75em 1em;
+    background: var(--color-yellow);
+    color: var(--color-base-00);
+    font-weight: 500;
+    text-align: center;
+}
+
+/* Fallback error styling */
+.sqlite-error-fallback {
+    margin: 1em 0;
+    padding: 1em;
+    background: var(--background-secondary);
+    border: 1px solid var(--color-red);
+    border-radius: var(--radius-s);
+    color: var(--text-error);
+    font-family: var(--font-monospace);
+}
+
+/* ================================ */
+/* NEO4J GRAPH QUERY STYLES        */
+/* ================================ */
+
+/* Main container for Neo4j query results */
+.neo4j-query-result {
+    margin: 1em 0;
+    border: 1px solid var(--color-cyan);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+    overflow: hidden;
+}
+
+/* Neo4j metadata header */
+.neo4j-query-metadata {
+    padding: 0.5em 1em;
+    background: var(--color-cyan);
+    color: var(--color-base-00);
+    border-bottom: 1px solid var(--background-modifier-border);
+    font-size: 0.85em;
+}
+
+.neo4j-metadata-text {
+    font-family: var(--font-monospace);
+    font-weight: 500;
+}
+
+/* Graph section styling */
+.neo4j-graph-section {
+    margin: 1em 0;
+}
+
+.neo4j-graph-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.75em 1em;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.neo4j-graph-icon {
+    font-size: 1.2em;
+}
+
+.neo4j-graph-title {
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+/* Section headers */
+.neo4j-section-header {
+    padding: 0.5em 1em;
+    background: var(--background-modifier-form-field);
+    font-weight: 600;
+    color: var(--text-normal);
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* Nodes styling */
+.neo4j-nodes-section {
+    margin-bottom: 1em;
+}
+
+.neo4j-nodes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1em;
+    padding: 1em;
+}
+
+.neo4j-node-card {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: 0.75em;
+    background: var(--background-secondary);
+    transition: all 0.2s ease;
+}
+
+.neo4j-node-card:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--color-cyan);
+}
+
+.neo4j-node-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5em;
+    padding-bottom: 0.5em;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.neo4j-node-id {
+    font-family: var(--font-monospace);
+    font-size: 0.8em;
+    color: var(--text-muted);
+}
+
+.neo4j-node-labels {
+    display: flex;
+    gap: 0.25em;
+}
+
+.neo4j-node-label {
+    background: var(--color-cyan);
+    color: var(--color-base-00);
+    padding: 0.15em 0.4em;
+    border-radius: var(--radius-s);
+    font-size: 0.75em;
+    font-weight: 600;
+}
+
+.neo4j-node-properties {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25em;
+}
+
+.neo4j-property {
+    display: flex;
+    gap: 0.5em;
+    font-size: 0.85em;
+}
+
+.neo4j-property-key {
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 60px;
+}
+
+.neo4j-property-value {
+    color: var(--text-normal);
+    font-family: var(--font-monospace);
+}
+
+/* Relationships styling */
+.neo4j-relationships-section {
+    margin-bottom: 1em;
+}
+
+.neo4j-relationships-list {
+    padding: 1em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75em;
+}
+
+.neo4j-relationship {
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: 0.75em;
+    background: var(--background-secondary);
+}
+
+.neo4j-relationship-viz {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.5em;
+    font-weight: 500;
+}
+
+.neo4j-rel-node {
+    background: var(--color-green);
+    color: var(--color-base-00);
+    padding: 0.2em 0.5em;
+    border-radius: var(--radius-s);
+    font-size: 0.85em;
+}
+
+.neo4j-rel-arrow {
+    color: var(--text-muted);
+    font-size: 1.2em;
+}
+
+.neo4j-rel-type {
+    background: var(--color-orange);
+    color: var(--color-base-00);
+    padding: 0.2em 0.5em;
+    border-radius: var(--radius-s);
+    font-size: 0.85em;
+    font-weight: 600;
+}
+
+.neo4j-relationship-properties {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    margin-top: 0.5em;
+}
+
+.neo4j-rel-property {
+    background: var(--background-modifier-form-field);
+    padding: 0.2em 0.4em;
+    border-radius: var(--radius-s);
+    font-size: 0.8em;
+    display: flex;
+    gap: 0.25em;
+}
+
+/* Table section for Neo4j results */
+.neo4j-table-section {
+    margin: 1em 0;
+}
+
+.neo4j-table-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.75em 1em;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.neo4j-table-icon {
+    font-size: 1.2em;
+}
+
+.neo4j-table-title {
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.neo4j-table-wrapper {
+    max-height: 400px;
+    overflow: auto;
+}
+
+.neo4j-result-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+
+.neo4j-table-header-cell {
+    background: var(--background-secondary);
+    padding: 0.5em 0.75em;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid var(--background-modifier-border);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.neo4j-table-cell {
+    padding: 0.5em 0.75em;
+    border-bottom: 1px solid var(--background-modifier-border);
+    vertical-align: top;
+    max-width: 300px;
+    word-wrap: break-word;
+}
+
+.neo4j-table-row-even {
+    background: var(--background-primary);
+}
+
+.neo4j-table-row-odd {
+    background: var(--background-primary-alt);
+}
+
+.neo4j-table-row-even:hover,
+.neo4j-table-row-odd:hover {
+    background: var(--background-modifier-hover);
+}
+
+/* Neo4j cell value styling */
+.neo4j-cell-null {
+    color: var(--text-muted);
+    font-style: italic;
+    opacity: 0.7;
+}
+
+.neo4j-cell-number {
+    color: var(--color-blue);
+    font-family: var(--font-monospace);
+}
+
+.neo4j-cell-boolean {
+    color: var(--color-purple);
+    font-family: var(--font-monospace);
+}
+
+.neo4j-cell-text {
+    color: var(--text-normal);
+}
+
+.neo4j-cell-object {
+    color: var(--color-orange);
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+}
+
+.neo4j-cell-node {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.neo4j-cell-node-labels {
+    background: var(--color-cyan);
+    color: var(--color-base-00);
+    padding: 0.1em 0.3em;
+    border-radius: var(--radius-s);
+    font-size: 0.75em;
+    font-weight: 600;
+}
+
+.neo4j-cell-node-props {
+    font-family: var(--font-monospace);
+    color: var(--text-normal);
+}
+
+.neo4j-cell-relationship {
+    background: var(--color-orange);
+    color: var(--color-base-00);
+    padding: 0.1em 0.3em;
+    border-radius: var(--radius-s);
+    font-size: 0.8em;
+    font-weight: 600;
+}
+
+/* Neo4j error styling */
+.neo4j-query-error {
+    margin: 1em 0;
+    border: 1px solid var(--color-red);
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+    overflow: hidden;
+}
+
+.neo4j-error-header {
+    background: var(--color-red);
+    color: white;
+    padding: 0.75em 1em;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.neo4j-error-icon {
+    font-size: 1.2em;
+}
+
+.neo4j-error-title {
+    font-weight: 600;
+}
+
+.neo4j-error-message {
+    padding: 1em;
+}
+
+.neo4j-error-text {
+    color: var(--text-error);
+    font-weight: 500;
+    margin-bottom: 1em;
+}
+
+.neo4j-error-query {
+    margin-top: 1em;
+    padding-top: 1em;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.neo4j-error-query-label {
+    font-weight: 600;
+    margin-bottom: 0.5em;
+    color: var(--text-muted);
+}
+
+.neo4j-error-query-code {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: 0.75em;
+    margin: 0;
+    overflow-x: auto;
+}
+
+.neo4j-error-query-code code {
+    background: none;
+    padding: 0;
+    font-family: var(--font-monospace);
+    color: var(--text-normal);
+}
+
+.neo4j-error-help {
+    margin-top: 1em;
+    padding-top: 1em;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.neo4j-help-title {
+    font-weight: 600;
+    margin-bottom: 0.5em;
+    color: var(--text-normal);
+}
+
+.neo4j-help-list {
+    margin: 0;
+    padding-left: 1.5em;
+}
+
+.neo4j-help-item {
+    margin-bottom: 0.5em;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* Neo4j empty result */
+.neo4j-empty-result {
+    padding: 2em;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.neo4j-empty-icon {
+    font-size: 2em;
+    margin-bottom: 0.5em;
+}
+
+.neo4j-empty-message {
+    font-style: italic;
+}
+
+/* Neo4j footer */
+.neo4j-query-footer {
+    padding: 0.5em 1em;
+    background: var(--background-secondary);
+    border-top: 1px solid var(--background-modifier-border);
+    font-size: 0.8em;
+}
+
+.neo4j-footer-text {
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+}
+
+/* Neo4j truncation warning */
+.neo4j-truncation-warning {
+    padding: 0.75em 1em;
+    background: var(--color-yellow);
+    color: var(--color-base-00);
+    font-weight: 500;
+    text-align: center;
+}
+
+/* Neo4j fallback error */
+.neo4j-error-fallback {
+    margin: 1em 0;
+    padding: 1em;
+    background: var(--background-secondary);
+    border: 1px solid var(--color-red);
+    border-radius: var(--radius-s);
+    color: var(--text-error);
+    font-family: var(--font-monospace);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .sqlite-table-wrapper,
+    .neo4j-table-wrapper {
+        max-height: 300px;
+    }
+    
+    .sqlite-table-cell,
+    .neo4j-table-cell {
+        max-width: 200px;
+        font-size: 0.85em;
+    }
+    
+    .neo4j-nodes-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .neo4j-relationship-viz {
+        flex-wrap: wrap;
+    }
+}
+
+/* Dark theme adjustments */
+.theme-dark .sqlite-query-result,
+.theme-dark .neo4j-query-result {
+    border-color: var(--background-modifier-border);
+}
+
+.theme-dark .sqlite-result-table,
+.theme-dark .neo4j-result-table {
+    color: var(--text-normal);
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .sqlite-query-result,
+    .neo4j-query-result {
+        border-width: 2px;
+    }
+    
+    .sqlite-table-header,
+    .neo4j-table-header-cell {
+        border-bottom-width: 3px;
+    }
+    
+    .neo4j-node-label,
+    .neo4j-rel-type {
+        font-weight: 700;
+    }
+}

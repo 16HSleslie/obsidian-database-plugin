@@ -1,11 +1,11 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
-	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+    "id": "obsidian-database-plugin",
+    "name": "Database Query Engine",
+    "version": "0.1.0",
+    "minAppVersion": "0.15.0",
+    "description": "Execute SQL and Cypher queries directly in your notes using code blocks. Supports both SQLite (relational) and Neo4j (graph) databases for comprehensive data analysis.",
+    "author": "Your Name",
+    "authorUrl": "https://github.com/yourusername",
+    "isDesktopOnly": true,
+    "requiredApiVersion": "0.15.0"
 }
