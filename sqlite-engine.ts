@@ -1,83 +1,77 @@
-import { Logger } from './logger';
+import { PluginLogger } from './logger';
 
 /**
- * SQLite Query Engine with robust dependency handling and fallback mechanisms
- * Handles both external SQLite connections and mock data for development
+ * SQLite Query Engine - External databases only
+ * No mock data - only connects to real SQLite databases
  */
 export class SQLiteQueryEngine {
-    private logger: Logger;
+    private logger: PluginLogger;
     private database: any = null;
     private isExternalDatabase: boolean = false;
     private isInitialized: boolean = false;
-    private mockDatabase: MockSQLiteDatabase;
 
-    constructor(logger: Logger) {
+    constructor(logger: PluginLogger) {
         this.logger = logger;
-        this.mockDatabase = new MockSQLiteDatabase();
     }
 
     /**
-     * Initialize the SQLite engine with comprehensive dependency checking
-     * Falls back gracefully when external dependencies unavailable
+     * Initialize the SQLite engine - external database only
      */
     async initialize(databasePath?: string): Promise<boolean> {
-        this.logger.info('[QueryEngine] Initializing SQLite Query Engine...', { databasePath });
+        this.logger.info('Initializing SQLite Query Engine...', { databasePath });
+
+        if (!databasePath) {
+            this.logger.warn('No database path provided - SQLite engine will not be available');
+            return false;
+        }
 
         try {
-            // Attempt external database connection if path provided
-            if (databasePath) {
-                const externalConnected = await this.tryExternalDatabase(databasePath);
-                if (externalConnected) {
-                    this.logger.info('[QueryEngine] External SQLite database connected successfully');
-                    this.isInitialized = true;
-                    return true;
-                }
+            // Attempt external database connection
+            const connected = await this.tryExternalDatabase(databasePath);
+            if (connected) {
+                this.logger.info('External SQLite database connected successfully');
+                this.isInitialized = true;
+                return true;
             }
 
-            // Fall back to mock database with proper initialization
-            return await this.initializeMockDatabase();
+            this.logger.error('Failed to connect to external SQLite database');
+            return false;
 
         } catch (error) {
-            this.logger.error('[QueryEngine] Critical initialization error', {
-                errorName: error.name,
-                errorMessage: error.message,
-                errorStack: error.stack
+            this.logger.error('Critical initialization error', error, {
+                databasePath
             });
-            
-            // Ensure we always have a working fallback
-            return await this.initializeMockDatabase();
+            return false;
         }
     }
 
     /**
-     * Attempt to connect to external SQLite database with proper error handling
+     * Attempt to connect to external SQLite database
      */
     private async tryExternalDatabase(databasePath: string): Promise<boolean> {
-        this.logger.info('[QueryEngine] Attempting external SQLite connection...', { path: databasePath });
+        this.logger.info('Attempting external SQLite connection...', { path: databasePath });
 
         try {
             // Check for obsidian-sqlite3 plugin integration first
             const obsidianSqliteResult = await this.tryObsidianSqlitePlugin();
             if (obsidianSqliteResult) {
-                this.logger.info('[QueryEngine] Connected via obsidian-sqlite3 plugin');
+                this.logger.info('Connected via obsidian-sqlite3 plugin');
                 return true;
             }
 
             // Try direct better-sqlite3 integration
             const directResult = await this.tryDirectSqliteConnection(databasePath);
             if (directResult) {
-                this.logger.info('[QueryEngine] Connected via direct better-sqlite3');
+                this.logger.info('Connected via direct better-sqlite3');
                 return true;
             }
 
-            this.logger.warn('[QueryEngine] All external connection methods failed, using mock database');
+            this.logger.error('All SQLite connection methods failed');
             return false;
 
         } catch (error) {
-            this.logger.error('[QueryEngine] External database connection failed', {
-                path: databasePath,
-                errorName: error.name,
-                errorMessage: error.message
+            this.logger.error('External database connection failed', error, {
+                path: databasePath
             });
             return false;
         }
@@ -91,7 +85,7 @@ export class SQLiteQueryEngine {
             // Check if obsidian-sqlite3 plugin is loaded
             const app = (window as any).app;
             if (!app?.plugins?.enabledPlugins?.has?.('obsidian-sqlite3')) {
-                this.logger.info('[QueryEngine] obsidian-sqlite3 plugin not found or not enabled');
+                this.logger.info('obsidian-sqlite3 plugin not found or not enabled');
                 return false;
             }
 
@@ -99,150 +93,207 @@ export class SQLiteQueryEngine {
             if (sqlitePlugin?.api) {
                 this.database = sqlitePlugin.api;
                 this.isExternalDatabase = true;
-                this.logger.info('[QueryEngine] Successfully connected via obsidian-sqlite3 plugin');
+                this.logger.info('Successfully connected via obsidian-sqlite3 plugin');
                 return true;
             }
 
             return false;
         } catch (error) {
-            this.logger.warn('[QueryEngine] Failed to connect via obsidian-sqlite3 plugin', { error: error.message });
+            this.logger.warn('Failed to connect via obsidian-sqlite3 plugin', { error: error.message });
             return false;
         }
     }
 
     /**
-     * Try direct better-sqlite3 connection with Electron-compatible loading
+     * Try direct better-sqlite3 connection
      */
     private async tryDirectSqliteConnection(databasePath: string): Promise<boolean> {
         try {
-            // Multiple approaches for loading better-sqlite3 in Electron environment
+            this.logger.info('Attempting direct better-sqlite3 connection...', { path: databasePath });
+            
+            // Get resolved path first
+            const resolvedPath = await this.getResolvedDatabasePath(databasePath);
+            if (!resolvedPath) {
+                this.logger.error('Database file not accessible', { path: databasePath });
+                return false;
+            }
+
+            // Import better-sqlite3 using the same approach as the working plugin
             let Database;
             
             try {
-                // Standard require (may work in some Electron configurations)
-                Database = require('better-sqlite3');
-            } catch (requireError) {
+                // Try the standard import approach first (like the working plugin)
+                Database = await import('better-sqlite3');
+                Database = Database.default || Database;
+                this.logger.info('Loaded better-sqlite3 via import');
+            } catch (importError) {
+                this.logger.warn('Import failed, trying require', { error: importError.message });
+                
                 try {
-                    // Try dynamic import (modern alternative)
-                    const module = await import('better-sqlite3');
-                    Database = module.default || module;
-                } catch (importError) {
-                    try {
-                        // Try Electron-specific loading
-                        const { remote } = require('electron');
-                        Database = remote.require('better-sqlite3');
-                    } catch (electronError) {
-                        this.logger.warn('[QueryEngine] All better-sqlite3 loading methods failed', {
-                            requireError: requireError.message,
-                            importError: importError.message,
-                            electronError: electronError.message
-                        });
-                        return false;
-                    }
+                    // Fallback to require if import fails
+                    Database = require('better-sqlite3');
+                    this.logger.info('Loaded better-sqlite3 via require');
+                } catch (requireError) {
+                    this.logger.error('All better-sqlite3 loading methods failed', {
+                        importError: importError.message,
+                        requireError: requireError.message
+                    });
+                    return false;
                 }
             }
 
-            // Verify file exists and is accessible
-            if (!await this.verifyDatabaseFile(databasePath)) {
-                this.logger.error('[QueryEngine] Database file not accessible', { path: databasePath });
+            // Validate Database constructor
+            if (!Database || typeof Database !== 'function') {
+                this.logger.error('Database constructor not available', { 
+                    Database: typeof Database,
+                    hasDefault: !!(Database as any)?.default
+                });
                 return false;
             }
 
-            // Create database connection
-            this.database = new Database(databasePath, { 
-                readonly: true,  // Start with read-only for safety
-                fileMustExist: true
-            });
-
-            // Test the connection
-            const testResult = this.database.prepare('SELECT 1 as test').get();
-            if (testResult?.test === 1) {
-                this.isExternalDatabase = true;
-                this.logger.info('[QueryEngine] Direct SQLite connection successful');
-                return true;
+            // Create database connection using the working plugin's approach
+            this.logger.info('Creating database connection...', { path: resolvedPath });
+            
+            try {
+                // Use the exact same approach as the working plugin - simple and direct
+                this.database = new Database(resolvedPath);
+                this.logger.info('Database connection created successfully');
+            } catch (constructorError) {
+                this.logger.error('Database constructor failed', {
+                    error: constructorError.message,
+                    path: resolvedPath,
+                    stack: constructorError.stack
+                });
+                return false;
             }
 
-            return false;
+            // Test the connection
+            try {
+                this.logger.info('Testing database connection...');
+                const testResult = this.database.prepare('SELECT 1 as test').get();
+                
+                if (testResult?.test === 1) {
+                    this.isExternalDatabase = true;
+                    this.logger.info('Direct SQLite connection successful', { 
+                        testResult,
+                        readonly: this.database.readonly || 'unknown'
+                    });
+                    return true;
+                } else {
+                    this.logger.error('Connection test failed - unexpected result', { testResult });
+                    return false;
+                }
+            } catch (testError) {
+                this.logger.error('Connection test query failed', {
+                    error: testError.message,
+                    stack: testError.stack
+                });
+                return false;
+            }
 
         } catch (error) {
-            this.logger.warn('[QueryEngine] Direct better-sqlite3 connection failed', {
+            this.logger.error('Direct better-sqlite3 connection failed', {
                 path: databasePath,
-                errorName: error.name,
-                errorMessage: error.message
+                error: error.message,
+                stack: error.stack,
+                errorType: typeof error
             });
             return false;
         }
     }
 
     /**
-     * Verify database file exists and is accessible
+     * Get resolved database path and verify accessibility
      */
-    private async verifyDatabaseFile(databasePath: string): Promise<boolean> {
+    private async getResolvedDatabasePath(databasePath: string): Promise<string | null> {
         try {
-            // Check if file exists using multiple methods
             const fs = require('fs');
+            const path = require('path');
             
-            // Check if file exists
-            if (!fs.existsSync(databasePath)) {
-                this.logger.warn('[QueryEngine] Database file does not exist', { path: databasePath });
-                return false;
+            // Handle different path formats
+            let resolvedPath = databasePath;
+            
+            // If it's a relative path, try to resolve it relative to the vault
+            if (!path.isAbsolute(databasePath)) {
+                // Try relative to current working directory
+                const cwd = process.cwd();
+                const relativeToCwd = path.resolve(cwd, databasePath);
+                
+                this.logger.info('Resolving relative path', {
+                    original: databasePath,
+                    cwd: cwd,
+                    resolved: relativeToCwd
+                });
+                
+                if (fs.existsSync(relativeToCwd)) {
+                    resolvedPath = relativeToCwd;
+                    this.logger.info('Found file relative to CWD', { path: resolvedPath });
+                } else {
+                    // Try some common locations
+                    const possiblePaths = [
+                        databasePath,
+                        path.join(cwd, databasePath),
+                        path.join(process.env.HOME || process.env.USERPROFILE || '', databasePath)
+                    ];
+                    
+                    this.logger.info('Trying multiple path resolutions', { possiblePaths });
+                    
+                    for (const possiblePath of possiblePaths) {
+                        if (fs.existsSync(possiblePath)) {
+                            resolvedPath = possiblePath;
+                            this.logger.info('Found file at', { path: resolvedPath });
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Final existence check
+            if (!fs.existsSync(resolvedPath)) {
+                this.logger.warn('Database file does not exist', { 
+                    originalPath: databasePath,
+                    resolvedPath: resolvedPath,
+                    cwd: process.cwd()
+                });
+                return null;
             }
 
             // Check if file is readable
-            fs.accessSync(databasePath, fs.constants.R_OK);
-            
-            this.logger.info('[QueryEngine] Database file verified', { path: databasePath });
-            return true;
-
-        } catch (error) {
-            this.logger.warn('[QueryEngine] File verification failed', {
-                path: databasePath,
-                error: error.message
-            });
-            return false;
-        }
-    }
-
-    /**
-     * Initialize mock database with proper error handling
-     */
-    private async initializeMockDatabase(): Promise<boolean> {
-        try {
-            this.logger.info('[QueryEngine] Initializing mock SQLite database...');
-            
-            // Initialize mock database
-            await this.mockDatabase.initialize();
-            this.database = this.mockDatabase;
-            this.isExternalDatabase = false;
-            this.isInitialized = true;
-
-            // Test mock database
-            const testResult = await this.executeQuery('SELECT 1 as test');
-            if (testResult.success) {
-                this.logger.info('[QueryEngine] Mock database initialized successfully');
-                return true;
-            } else {
-                throw new Error('Mock database test query failed');
+            try {
+                fs.accessSync(resolvedPath, fs.constants.R_OK);
+                this.logger.info('Database file verified', { 
+                    originalPath: databasePath,
+                    resolvedPath: resolvedPath,
+                    size: fs.statSync(resolvedPath).size
+                });
+                
+                return resolvedPath;
+            } catch (accessError) {
+                this.logger.warn('File exists but is not readable', {
+                    path: resolvedPath,
+                    error: accessError.message
+                });
+                return null;
             }
 
         } catch (error) {
-            this.logger.error('[QueryEngine] Mock database initialization failed', {
-                errorName: error.name,
-                errorMessage: error.message,
-                errorStack: error.stack
+            this.logger.warn('Path resolution failed', {
+                path: databasePath,
+                error: error.message,
+                stack: error.stack
             });
-            return false;
+            return null;
         }
     }
 
     /**
-     * Execute SQL query with comprehensive error handling and performance monitoring
+     * Execute SQL query - external database only
      */
     async executeQuery(query: string, sourcePath?: string): Promise<QueryResult> {
         const executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const startTime = performance.now();
 
-        this.logger.info('[QueryEngine] Starting query execution', {
+        this.logger.info('Starting query execution', {
             query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
             executionId,
             sourcePath
@@ -251,82 +302,100 @@ export class SQLiteQueryEngine {
         try {
             // Check if engine is initialized
             if (!this.isInitialized || !this.database) {
-                throw new Error('SQLite engine not initialized. Please check database connection.');
+                throw new Error('SQLite engine not initialized. No external database connection available.');
             }
 
-            // Validate query (basic SQL injection prevention)
+            // Validate query
             if (!this.isValidQuery(query)) {
                 throw new Error('Invalid or potentially unsafe query. Only SELECT queries are supported.');
             }
 
-            let results;
             const cleanQuery = query.trim();
+            let results;
 
-            // Execute query based on database type
+            // Execute query on external database
             if (this.isExternalDatabase && this.database.prepare) {
-                // Real SQLite database
                 const statement = this.database.prepare(cleanQuery);
                 results = statement.all();
-            } else if (this.mockDatabase && typeof this.database.query === 'function') {
-                // Mock database
-                results = await this.database.query(cleanQuery);
             } else {
-                throw new Error('Database interface not available');
+                throw new Error('No external database connection available');
             }
 
             const executionTime = performance.now() - startTime;
 
-            this.logger.info('[QueryEngine] Query executed successfully', {
+            this.logger.info('Query executed successfully', {
                 executionId,
                 executionTime: `${executionTime.toFixed(2)}ms`,
                 rowCount: Array.isArray(results) ? results.length : 0,
                 sourcePath
             });
 
+            // Transform results to expected format
+            const transformedResults = this.transformResults(results);
+
             return {
                 success: true,
-                data: Array.isArray(results) ? results : [],
-                rowCount: Array.isArray(results) ? results.length : 0,
+                data: transformedResults.data,
+                columns: transformedResults.columns,
+                rows: transformedResults.rows,
+                rowCount: transformedResults.rows.length,
                 executionTime: Math.round(executionTime),
-                executionId
+                context: { executionId }
             };
 
         } catch (error) {
             const executionTime = performance.now() - startTime;
 
-            this.logger.error('[QueryEngine] Query execution failed', {
+            this.logger.error('Query execution failed', error, {
                 query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
                 executionId,
                 executionTime: `${executionTime.toFixed(2)}ms`,
-                sourcePath,
-                errorName: error.name,
-                errorMessage: error.message,
-                errorStack: error.stack
+                sourcePath
             });
 
             return {
                 success: false,
                 error: `Query execution failed: ${error.message}`,
                 executionTime: Math.round(executionTime),
-                executionId,
                 data: [],
-                rowCount: 0
+                columns: [],
+                rows: [],
+                rowCount: 0,
+                context: { executionId }
             };
         }
     }
 
     /**
-     * Validate SQL query for security and compatibility
+     * Transform database results to expected format
+     */
+    private transformResults(results: any[]): { data: any[], columns: string[], rows: any[][] } {
+        if (!Array.isArray(results) || results.length === 0) {
+            return { data: [], columns: [], rows: [] };
+        }
+
+        const columns = Object.keys(results[0]);
+        const rows = results.map(result => 
+            columns.map(column => result[column])
+        );
+
+        return {
+            data: results,
+            columns,
+            rows
+        };
+    }
+
+    /**
+     * Validate SQL query for security
      */
     private isValidQuery(query: string): boolean {
         const cleanQuery = query.trim().toLowerCase();
         
-        // Only allow SELECT queries for security
         if (!cleanQuery.startsWith('select')) {
             return false;
         }
 
-        // Basic SQL injection prevention
         const dangerousPatterns = [
             /;\s*(drop|delete|insert|update|create|alter)/i,
             /--/,
@@ -340,27 +409,31 @@ export class SQLiteQueryEngine {
     }
 
     /**
-     * Get current database status and diagnostics
+     * Get database status
      */
     getStatus(): DatabaseStatus {
         return {
             isInitialized: this.isInitialized,
             isExternalDatabase: this.isExternalDatabase,
-            databaseType: this.isExternalDatabase ? 'SQLite (External)' : 'Mock Database',
+            databaseType: this.isExternalDatabase ? 'SQLite (External)' : 'Not Connected',
             hasActiveConnection: !!this.database,
             canExecuteQueries: this.isInitialized && !!this.database
         };
     }
 
     /**
-     * Test database connection with simple query
+     * Test database connection
      */
     async testConnection(): Promise<boolean> {
         try {
+            if (!this.isInitialized || !this.database) {
+                return false;
+            }
+            
             const result = await this.executeQuery('SELECT 1 as test');
             return result.success && result.data?.[0]?.test === 1;
         } catch (error) {
-            this.logger.error('[QueryEngine] Connection test failed', { error: error.message });
+            this.logger.error('Connection test failed', error);
             return false;
         }
     }
@@ -372,7 +445,7 @@ export class SQLiteQueryEngine {
         try {
             if (this.database && this.isExternalDatabase && typeof this.database.close === 'function') {
                 this.database.close();
-                this.logger.info('[QueryEngine] Database connection closed');
+                this.logger.info('Database connection closed');
             }
             
             this.database = null;
@@ -380,110 +453,25 @@ export class SQLiteQueryEngine {
             this.isExternalDatabase = false;
             
         } catch (error) {
-            this.logger.error('[QueryEngine] Cleanup error', { error: error.message });
+            this.logger.error('Cleanup error', error);
         }
     }
 }
 
 /**
- * Mock SQLite Database for development and fallback
+ * Type definitions for SQL query results
  */
-class MockSQLiteDatabase {
-    private data: { [tableName: string]: any[] } = {};
-    private isInitialized: boolean = false;
-
-    async initialize(): Promise<void> {
-        // Create sample data
-        this.data.books = [
-            { id: 1, name: 'TypeScript Handbook', author: 'Microsoft', year: 2023, rating: 4.8 },
-            { id: 2, name: 'Clean Code', author: 'Robert Martin', year: 2021, rating: 4.9 },
-            { id: 3, name: 'Design Patterns', author: 'Gang of Four', year: 2022, rating: 4.7 },
-            { id: 4, name: 'Refactoring', author: 'Martin Fowler', year: 2023, rating: 4.6 },
-            { id: 5, name: 'JavaScript: The Good Parts', author: 'Douglas Crockford', year: 2021, rating: 4.5 }
-        ];
-
-        this.data.authors = [
-            { id: 1, name: 'Microsoft', country: 'USA', founded: 1975 },
-            { id: 2, name: 'Robert Martin', country: 'USA', founded: null },
-            { id: 3, name: 'Gang of Four', country: 'Various', founded: null },
-            { id: 4, name: 'Martin Fowler', country: 'UK', founded: null },
-            { id: 5, name: 'Douglas Crockford', country: 'USA', founded: null }
-        ];
-
-        this.isInitialized = true;
-    }
-
-    async query(sql: string): Promise<any[]> {
-        if (!this.isInitialized) {
-            throw new Error('Mock database not initialized');
-        }
-
-        const cleanSql = sql.trim().toLowerCase();
-        
-        // Simple query parser for mock data
-        if (cleanSql.includes('select 1 as test')) {
-            return [{ test: 1 }];
-        }
-
-        if (cleanSql.includes('from books')) {
-            let results = [...this.data.books];
-            
-            // Apply basic WHERE filtering
-            if (cleanSql.includes('where')) {
-                // Extract simple conditions (very basic parser)
-                if (cleanSql.includes('rating >')) {
-                    const match = cleanSql.match(/rating\s*>\s*(\d+\.?\d*)/);
-                    if (match) {
-                        const threshold = parseFloat(match[1]);
-                        results = results.filter(book => book.rating > threshold);
-                    }
-                }
-                
-                if (cleanSql.includes('year >=')) {
-                    const match = cleanSql.match(/year\s*>=\s*(\d+)/);
-                    if (match) {
-                        const threshold = parseInt(match[1]);
-                        results = results.filter(book => book.year >= threshold);
-                    }
-                }
-            }
-
-            // Apply ORDER BY
-            if (cleanSql.includes('order by rating desc')) {
-                results.sort((a, b) => b.rating - a.rating);
-            }
-
-            // Apply LIMIT
-            if (cleanSql.includes('limit')) {
-                const match = cleanSql.match(/limit\s+(\d+)/);
-                if (match) {
-                    const limit = parseInt(match[1]);
-                    results = results.slice(0, limit);
-                }
-            }
-
-            return results;
-        }
-
-        if (cleanSql.includes('from authors')) {
-            return [...this.data.authors];
-        }
-
-        // Fallback for unrecognized queries
-        throw new Error(`Unsupported query in mock database: ${sql}`);
-    }
-}
-
-/**
- * Type definitions
- */
-interface QueryResult {
+export interface QueryResult {
     success: boolean;
     data: any[];
+    columns: string[];
+    rows: any[][];
     rowCount: number;
     executionTime: number;
-    executionId: string;
     error?: string;
+    context?: {
+        executionId: string;
+    };
 }
 
 interface DatabaseStatus {

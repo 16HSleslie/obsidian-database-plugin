@@ -1,5 +1,5 @@
 /**
- * Centralized logging system for the SQLite Plugin
+ * Centralized logging system for the Database Plugin
  * Provides structured logging with context and robust error handling
  */
 

@@ -1,13 +1,12 @@
 import { Plugin, MarkdownPostProcessorContext, PluginSettingTab, Setting, App } from 'obsidian';
 import { SQLiteQueryEngine } from './sqlite-engine';
+import type { QueryResult } from './sqlite-engine';
 import { Neo4jQueryEngine } from './neo4j-engine';
+import type { GraphQueryResult } from './neo4j-engine';
 import { QueryResultRenderer } from './result-renderer';
 import { GraphResultRenderer } from './graph-result-renderer';
 import { PluginLogger } from './logger';
 
-/**
- * Plugin settings interface
- */
 interface DatabasePluginSettings {
     sqliteDatabasePath: string;
     neo4jDatabasePath: string;
@@ -16,9 +15,6 @@ interface DatabasePluginSettings {
     maxResultRows: number;
 }
 
-/**
- * Default plugin settings
- */
 const DEFAULT_SETTINGS: DatabasePluginSettings = {
     sqliteDatabasePath: '',
     neo4jDatabasePath: '',
@@ -27,65 +23,45 @@ const DEFAULT_SETTINGS: DatabasePluginSettings = {
     maxResultRows: 1000
 };
 
-/**
- * Database plugin with full settings UI support
- */
 export default class DatabasePlugin extends Plugin {
     settings: DatabasePluginSettings;
     private sqliteEngine: SQLiteQueryEngine | null = null;
     private neo4jEngine: Neo4jQueryEngine | null = null;
     private sqlResultRenderer: QueryResultRenderer;
     private graphResultRenderer: GraphResultRenderer;
-    public logger: PluginLogger; // Make logger public for testing methods
+    public logger: PluginLogger;
 
-    /**
-     * Plugin initialization - called when plugin is loaded/enabled
-     */
     async onload() {
         try {
-            // Load plugin settings first
             await this.loadSettings();
 
-            // Initialize logger with plugin-specific context
             this.logger = new PluginLogger('DatabasePlugin', this.app.vault.getName());
-            this.logger.info('Initializing Database Plugin (SQLite + Neo4j)...', {
+            this.logger.info('Initializing Database Plugin (External databases only)...', {
                 sqliteEnabled: this.settings.enableSQLite,
                 neo4jEnabled: this.settings.enableNeo4j,
-                sqlitePath: this.settings.sqliteDatabasePath || 'mock data',
-                neo4jPath: this.settings.neo4jDatabasePath || 'mock data'
+                sqlitePath: this.settings.sqliteDatabasePath || 'not configured',
+                neo4jPath: this.settings.neo4jDatabasePath || 'not configured'
             });
 
-            // Initialize result renderers first (no dependencies)
             this.sqlResultRenderer = new QueryResultRenderer(this.logger);
             this.graphResultRenderer = new GraphResultRenderer(this.logger);
 
-            // Initialize database engines based on settings
             await this.initializeDatabaseEngines();
-
-            // Register markdown code block processors based on settings
             this.registerCodeBlockProcessors();
-
-            // Add settings tab to Obsidian
             this.addSettingTab(new DatabaseSettingTab(this.app, this));
             
             this.logger.info('Database Plugin loaded successfully');
             
         } catch (error) {
             this.logger.error('Failed to initialize Database Plugin', error);
-            
-            // Register error handlers for code blocks even if initialization failed
             this.registerErrorHandlers();
         }
     }
 
-    /**
-     * Plugin cleanup - called when plugin is unloaded/disabled
-     */
     onunload() {
         try {
             this.logger.info('Unloading Database Plugin...');
             
-            // Cleanup resources
             if (this.sqliteEngine) {
                 this.sqliteEngine.cleanup();
             }
@@ -100,27 +76,17 @@ export default class DatabasePlugin extends Plugin {
         }
     }
 
-    /**
-     * Load plugin settings
-     */
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     }
 
-    /**
-     * Save plugin settings
-     */
     async saveSettings() {
         await this.saveData(this.settings);
     }
 
-    /**
-     * Reinitialize database engines (called when settings change)
-     */
     async reinitializeDatabases() {
         this.logger.info('Reinitializing databases due to settings change...');
         
-        // Cleanup existing engines
         if (this.sqliteEngine) {
             this.sqliteEngine.cleanup();
             this.sqliteEngine = null;
@@ -130,57 +96,39 @@ export default class DatabasePlugin extends Plugin {
             this.neo4jEngine = null;
         }
 
-        // Reinitialize with new settings
         await this.initializeDatabaseEngines();
-        
         this.logger.info('Database reinitialization complete');
     }
 
-    /**
-     * Initialize both database engines based on settings
-     */
     private async initializeDatabaseEngines(): Promise<void> {
-        // Initialize SQLite engine if enabled
         if (this.settings.enableSQLite) {
             try {
-                // Initialize SQLite engine
-                const sqliteSuccess = await this.sqliteEngine.initialize(this.settings.sqlitePath);
-                if (!sqliteSuccess) {
-                    this.logger.warn('SQLite engine using mock data');
-                }
-
-                // Initialize Neo4j engine  
-                const neo4jSuccess = await this.neo4jEngine.initialize(this.settings.neo4jConnectionString);
-                if (!neo4jSuccess) {
-                    this.logger.warn('Neo4j engine using mock data');
-                }
-
-                this.logger.info('Database engines initialized', {
-                    sqlite: sqliteSuccess ? 'external' : 'mock',
-                    neo4j: neo4jSuccess ? 'external' : 'mock'
+                this.sqliteEngine = new SQLiteQueryEngine(this.logger);
+                const dbPath = this.settings.sqliteDatabasePath.trim() || undefined;
+                const sqliteSuccess = await this.sqliteEngine.initialize(dbPath);
+                
+                this.logger.info('SQLite engine initialization result', { 
+                    success: sqliteSuccess,
+                    configuredPath: dbPath || 'none'
                 });
-
             } catch (error) {
-                this.logger.error('Failed to initialize database engines', { error });
-                throw error;
+                this.logger.error('Failed to initialize SQLite engine', error);
+                this.sqliteEngine = null;
             }
         } else {
             this.logger.info('SQLite engine disabled in settings');
             this.sqliteEngine = null;
         }
 
-        // Initialize Neo4j engine if enabled
         if (this.settings.enableNeo4j) {
             try {
-                this.neo4jEngine = new Neo4jQueryEngine(this.logger, this.app);
-                
-                // Pass database path if provided, otherwise use mock data
+                this.neo4jEngine = new Neo4jQueryEngine(this.logger);
                 const dbPath = this.settings.neo4jDatabasePath.trim() || undefined;
-                await this.neo4jEngine.initialize(dbPath);
+                const neo4jSuccess = await this.neo4jEngine.initialize(dbPath);
                 
-                this.logger.info('Neo4j engine initialized successfully', { 
-                    configuredPath: dbPath || 'none',
-                    hasExternalPath: !!dbPath
+                this.logger.info('Neo4j engine initialization result', { 
+                    success: neo4jSuccess,
+                    configuredPath: dbPath || 'none'
                 });
             } catch (error) {
                 this.logger.error('Failed to initialize Neo4j engine', error);
@@ -192,28 +140,20 @@ export default class DatabasePlugin extends Plugin {
         }
     }
 
-    /**
-     * Register code block processors based on settings
-     */
     private registerCodeBlockProcessors(): void {
-        // SQLite code blocks (only if enabled)
-        if (this.settings.enableSQLite && this.sqliteEngine) {
+        if (this.settings.enableSQLite) {
             this.registerMarkdownCodeBlockProcessor('sql', this.processSQLCodeBlock.bind(this));
             this.registerMarkdownCodeBlockProcessor('sqlite', this.processSQLCodeBlock.bind(this));
             this.logger.debug('Registered SQLite code block processors');
         }
 
-        // Neo4j code blocks (only if enabled)
-        if (this.settings.enableNeo4j && this.neo4jEngine) {
+        if (this.settings.enableNeo4j) {
             this.registerMarkdownCodeBlockProcessor('neo4j', this.processCypherCodeBlock.bind(this));
             this.registerMarkdownCodeBlockProcessor('cypher', this.processCypherCodeBlock.bind(this));
             this.logger.debug('Registered Neo4j code block processors');
         }
     }
 
-    /**
-     * Register error handlers for all code block types
-     */
     private registerErrorHandlers(): void {
         this.registerMarkdownCodeBlockProcessor('sql', this.processErrorCodeBlock.bind(this));
         this.registerMarkdownCodeBlockProcessor('sqlite', this.processErrorCodeBlock.bind(this));
@@ -221,9 +161,6 @@ export default class DatabasePlugin extends Plugin {
         this.registerMarkdownCodeBlockProcessor('cypher', this.processErrorCodeBlock.bind(this));
     }
 
-    /**
-     * Process SQL code blocks and execute queries
-     */
     private async processSQLCodeBlock(
         source: string, 
         el: HTMLElement, 
@@ -237,32 +174,23 @@ export default class DatabasePlugin extends Plugin {
                 file: ctx.sourcePath
             });
 
-            // Check if SQLite engine is available
             if (!this.sqliteEngine) {
-                throw new Error('SQLite engine not available. Check plugin settings - SQLite may be disabled.');
+                throw new Error('SQLite engine not available. Check plugin settings and ensure external database is configured.');
             }
 
-            // Validate and clean the SQL query
             const cleanedSQL = this.validateAndCleanSQL(source);
+            const queryResult = await this.sqliteEngine.executeQuery(cleanedSQL, ctx.sourcePath);
             
-            // Execute the query through SQLite engine
-            const queryResult = await this.sqliteEngine.executeSelectQuery(cleanedSQL, {
-                sourcePath: ctx.sourcePath,
-                sourceElement: el
-            });
-            
-            // Render the results using SQL result renderer
             await this.sqlResultRenderer.renderResults(queryResult, el, {
                 sourcePath: ctx.sourcePath,
                 originalQuery: source,
                 maxRows: this.settings.maxResultRows
             });
 
-            // Log successful execution
             const executionTime = performance.now() - startTime;
             this.logger.info('SQL query executed successfully', { 
                 executionTime: `${executionTime.toFixed(2)}ms`,
-                rowCount: queryResult.rows.length,
+                rowCount: queryResult.rowCount,
                 file: ctx.sourcePath
             });
 
@@ -272,7 +200,6 @@ export default class DatabasePlugin extends Plugin {
                 file: ctx.sourcePath
             });
 
-            // Render error message using SQL result renderer
             this.sqlResultRenderer.renderError(error, el, {
                 originalQuery: source,
                 sourcePath: ctx.sourcePath
@@ -280,9 +207,6 @@ export default class DatabasePlugin extends Plugin {
         }
     }
 
-    /**
-     * Process Cypher code blocks and execute queries
-     */
     private async processCypherCodeBlock(
         source: string, 
         el: HTMLElement, 
@@ -296,28 +220,19 @@ export default class DatabasePlugin extends Plugin {
                 file: ctx.sourcePath
             });
 
-            // Check if Neo4j engine is available
             if (!this.neo4jEngine) {
-                throw new Error('Neo4j engine not available. Check plugin settings - Neo4j may be disabled.');
+                throw new Error('Neo4j engine not available. Check plugin settings and ensure external database is configured.');
             }
 
-            // Validate and clean the Cypher query
             const cleanedCypher = this.validateAndCleanCypher(source);
+            const queryResult = await this.neo4jEngine.executeQuery(cleanedCypher, ctx.sourcePath);
             
-            // Execute the query through Neo4j engine
-            const queryResult = await this.neo4jEngine.executeCypherQuery(cleanedCypher, {
-                sourcePath: ctx.sourcePath,
-                sourceElement: el
-            });
-            
-            // Render the results using graph result renderer
             await this.graphResultRenderer.renderGraphResults(queryResult, el, {
                 sourcePath: ctx.sourcePath,
                 originalQuery: source,
                 maxRecords: this.settings.maxResultRows
             });
 
-            // Log successful execution
             const executionTime = performance.now() - startTime;
             this.logger.info('Cypher query executed successfully', { 
                 executionTime: `${executionTime.toFixed(2)}ms`,
@@ -331,7 +246,6 @@ export default class DatabasePlugin extends Plugin {
                 file: ctx.sourcePath
             });
 
-            // Render error message using graph result renderer
             this.graphResultRenderer.renderGraphError(error, el, {
                 originalQuery: source,
                 sourcePath: ctx.sourcePath
@@ -339,15 +253,11 @@ export default class DatabasePlugin extends Plugin {
         }
     }
 
-    /**
-     * Handle code blocks when plugin is in error state
-     */
     private processErrorCodeBlock(
         source: string, 
         el: HTMLElement, 
         ctx: MarkdownPostProcessorContext
     ): void {
-        // Determine which renderer to use based on content
         const isGraphQuery = source.toLowerCase().includes('match') || 
                            source.toLowerCase().includes('create') ||
                            source.toLowerCase().includes('cypher');
@@ -367,34 +277,27 @@ export default class DatabasePlugin extends Plugin {
         }
     }
 
-    /**
-     * Validate and clean SQL query from markdown code block
-     */
     private validateAndCleanSQL(rawSQL: string): string {
         if (!rawSQL || rawSQL.trim().length === 0) {
             throw new Error('Empty SQL query provided');
         }
 
-        // Remove markdown artifacts and clean whitespace
         let cleaned = rawSQL
             .trim()
-            .replace(/^\s*```sql\s*/i, '')   // Remove opening code fence
-            .replace(/^\s*```sqlite\s*/i, '') // Remove SQLite opening code fence
-            .replace(/\s*```\s*$/, '')       // Remove closing code fence
+            .replace(/^\s*```sql\s*/i, '')
+            .replace(/^\s*```sqlite\s*/i, '')
+            .replace(/\s*```\s*$/, '')
             .trim();
 
-        // For now, only allow SELECT queries for security
         const upperSQL = cleaned.toUpperCase().trim();
         if (!upperSQL.startsWith('SELECT')) {
-            throw new Error('Only SELECT queries are currently supported. Other SQL operations will be added in future versions.');
+            throw new Error('Only SELECT queries are currently supported.');
         }
 
-        // Remove trailing semicolon if present (optional in SQLite)
         if (cleaned.endsWith(';')) {
             cleaned = cleaned.slice(0, -1).trim();
         }
 
-        // Basic validation - ensure it's not empty after cleaning
         if (cleaned.length === 0) {
             throw new Error('No valid SQL query found after cleaning');
         }
@@ -402,28 +305,22 @@ export default class DatabasePlugin extends Plugin {
         return cleaned;
     }
 
-    /**
-     * Validate and clean Cypher query from markdown code block
-     */
     private validateAndCleanCypher(rawCypher: string): string {
         if (!rawCypher || rawCypher.trim().length === 0) {
             throw new Error('Empty Cypher query provided');
         }
 
-        // Remove markdown artifacts and clean whitespace
         let cleaned = rawCypher
             .trim()
-            .replace(/^\s*```neo4j\s*/i, '')  // Remove opening code fence
-            .replace(/^\s*```cypher\s*/i, '') // Remove Cypher opening code fence
-            .replace(/\s*```\s*$/, '')        // Remove closing code fence
+            .replace(/^\s*```neo4j\s*/i, '')
+            .replace(/^\s*```cypher\s*/i, '')
+            .replace(/\s*```\s*$/, '')
             .trim();
 
-        // Remove trailing semicolon if present (optional in Cypher)
         if (cleaned.endsWith(';')) {
             cleaned = cleaned.slice(0, -1).trim();
         }
 
-        // Basic validation - ensure it's not empty after cleaning
         if (cleaned.length === 0) {
             throw new Error('No valid Cypher query found after cleaning');
         }
@@ -431,43 +328,39 @@ export default class DatabasePlugin extends Plugin {
         return cleaned;
     }
 
-    /**
-     * Get connection status for settings display
-     */
     getSQLiteStatus(): boolean {
-        return this.sqliteEngine !== null;
+        return this.sqliteEngine !== null && this.sqliteEngine.getStatus().canExecuteQueries;
     }
 
     getNeo4jStatus(): boolean {
-        return this.neo4jEngine !== null;
+        return this.neo4jEngine !== null && this.neo4jEngine.getStatus().canExecuteQueries;
     }
 
-    /**
-     * Get basic connection info for settings display
-     */
     getSQLiteInfo(): string {
         if (!this.sqliteEngine) return 'Not Connected';
-        const path = this.settings.sqliteDatabasePath.trim();
-        return path ? `External: ${path}` : 'Mock Data';
+        const status = this.sqliteEngine.getStatus();
+        if (status.canExecuteQueries) {
+            const path = this.settings.sqliteDatabasePath.trim();
+            return path ? `Connected: ${path}` : 'Connected';
+        }
+        return 'Connection Failed';
     }
 
     getNeo4jInfo(): string {
         if (!this.neo4jEngine) return 'Not Connected';
-        const path = this.settings.neo4jDatabasePath.trim();
-        return path ? `External: ${path}` : 'Mock Data';
+        const status = this.neo4jEngine.getStatus();
+        if (status.canExecuteQueries) {
+            const path = this.settings.neo4jDatabasePath.trim();
+            return path ? `Connected: ${path}` : 'Connected';
+        }
+        return 'Connection Failed';
     }
 
-    /**
-     * Safely truncate strings for logging to avoid console spam
-     */
     private truncateForLog(str: string, maxLength: number): string {
         return str.length > maxLength ? str.substring(0, maxLength) + '...' : str;
     }
 }
 
-/**
- * Settings tab for the Database Plugin
- */
 class DatabaseSettingTab extends PluginSettingTab {
     plugin: DatabasePlugin;
 
@@ -484,7 +377,7 @@ class DatabaseSettingTab extends PluginSettingTab {
         containerEl.createEl('h2', { text: 'Database Plugin Settings' });
         
         containerEl.createEl('p', { 
-            text: 'Configure database connections and execution options for SQL and Cypher queries.'
+            text: 'Configure external database connections for SQL and Cypher queries. Only external databases are supported.'
         });
 
         // SQLite Settings Section
@@ -492,21 +385,20 @@ class DatabaseSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Enable SQLite')
-            .setDesc('Enable SQL query execution with SQLite database')
+            .setDesc('Enable SQL query execution with external SQLite database')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableSQLite)
                 .onChange(async (value) => {
                     this.plugin.settings.enableSQLite = value;
                     await this.plugin.saveSettings();
-                    // Reinitialize when settings change
                     await this.plugin.reinitializeDatabases();
-                    this.display(); // Refresh the settings display
+                    this.display();
                 }));
 
         if (this.plugin.settings.enableSQLite) {
             new Setting(containerEl)
                 .setName('SQLite Database Path')
-                .setDesc('Path to your SQLite database file (.db, .sqlite, .sqlite3). Leave empty to use mock data.')
+                .setDesc('Path to your SQLite database file (.db, .sqlite, .sqlite3). Required for SQLite functionality.')
                 .addText(text => text
                     .setPlaceholder('/path/to/database.sqlite')
                     .setValue(this.plugin.settings.sqliteDatabasePath)
@@ -526,23 +418,22 @@ class DatabaseSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Enable Neo4j')
-            .setDesc('Enable Cypher query execution with Neo4j graph database')
+            .setDesc('Enable Cypher query execution with external Neo4j database')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.enableNeo4j)
                 .onChange(async (value) => {
                     this.plugin.settings.enableNeo4j = value;
                     await this.plugin.saveSettings();
-                    // Reinitialize when settings change
                     await this.plugin.reinitializeDatabases();
-                    this.display(); // Refresh the settings display
+                    this.display();
                 }));
 
         if (this.plugin.settings.enableNeo4j) {
             new Setting(containerEl)
                 .setName('Neo4j Connection')
-                .setDesc('Connection string for Neo4j (bolt://localhost:7687) or database path. Leave empty to use mock data.')
+                .setDesc('Connection string for Neo4j database. Format: bolt://username:password@host:port')
                 .addText(text => text
-                    .setPlaceholder('bolt://localhost:7687 or bolt://user:pass@localhost:7687')
+                    .setPlaceholder('bolt://neo4j:password@localhost:7687')
                     .setValue(this.plugin.settings.neo4jDatabasePath)
                     .onChange(async (value) => {
                         this.plugin.settings.neo4jDatabasePath = value;
@@ -560,7 +451,7 @@ class DatabaseSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Max Result Rows')
-            .setDesc('Maximum number of rows/records to display (prevents UI freezing with large datasets)')
+            .setDesc('Maximum number of rows/records to display')
             .addSlider(slider => slider
                 .setLimits(100, 5000, 100)
                 .setValue(this.plugin.settings.maxResultRows)
@@ -594,37 +485,21 @@ class DatabaseSettingTab extends PluginSettingTab {
         });
 
         // Setup Guide Section
-        containerEl.createEl('h3', { text: 'Setup Guide' });
+        containerEl.createEl('h3', { text: 'Setup Requirements' });
         
         const guideDiv = containerEl.createDiv({ cls: 'setup-guide' });
         
-        guideDiv.createEl('h4', { text: 'SQLite Setup:' });
-        guideDiv.createEl('p', { text: '1. Install the obsidian-sqlite3 plugin (recommended for file access)' });
-        guideDiv.createEl('p', { text: '2. Create or locate your .sqlite/.db file' });
-        guideDiv.createEl('p', { text: '3. Enter the full path: /path/to/your/database.sqlite' });
-        guideDiv.createEl('p', { text: '4. Click "Test Connection" to verify' });
+        guideDiv.createEl('h4', { text: 'SQLite Requirements:' });
+        guideDiv.createEl('p', { text: '• Install obsidian-sqlite3 plugin for file access (recommended)' });
+        guideDiv.createEl('p', { text: '• Create or locate your .sqlite/.db file' });
+        guideDiv.createEl('p', { text: '• Enter the full path to your database file' });
+        guideDiv.createEl('p', { text: '• Click "Test Connection" to verify access' });
         
-        guideDiv.createEl('h4', { text: 'Neo4j Setup:' });
-        guideDiv.createEl('p', { text: '1. Install Neo4j Desktop or use Neo4j Aura (cloud)' });
-        guideDiv.createEl('p', { text: '2. Start your database instance' });
-        guideDiv.createEl('p', { text: '3. Use connection format: bolt://localhost:7687' });
-        guideDiv.createEl('p', { text: '4. Include credentials: bolt://username:password@localhost:7687' });
-        guideDiv.createEl('p', { text: '5. Click "Test Connection" to verify' });
-
-        // Usage Examples Section
-        containerEl.createEl('h3', { text: 'Usage Examples' });
-        
-        const examplesDiv = containerEl.createDiv({ cls: 'usage-examples' });
-        
-        examplesDiv.createEl('h4', { text: 'SQLite Queries:' });
-        examplesDiv.createEl('pre', { 
-            text: '```sql\nSELECT * FROM your_table LIMIT 10\nSELECT COUNT(*) FROM your_table\n```'
-        });
-        
-        examplesDiv.createEl('h4', { text: 'Neo4j Queries:' });
-        examplesDiv.createEl('pre', { 
-            text: '```cypher\nMATCH (n) RETURN n LIMIT 10\nSHOW LABELS\n```'
-        });
+        guideDiv.createEl('h4', { text: 'Neo4j Requirements:' });
+        guideDiv.createEl('p', { text: '• Install and run Neo4j Desktop or use Neo4j Aura' });
+        guideDiv.createEl('p', { text: '• Start your database instance' });
+        guideDiv.createEl('p', { text: '• Use format: bolt://username:password@host:port' });
+        guideDiv.createEl('p', { text: '• Click "Test Connection" to verify access' });
 
         // Add a refresh button
         new Setting(containerEl)
@@ -635,94 +510,86 @@ class DatabaseSettingTab extends PluginSettingTab {
                 .setCta()
                 .onClick(async () => {
                     await this.plugin.reinitializeDatabases();
-                    this.display(); // Refresh the settings display
+                    this.display();
                 }));
     }
 
-    /**
-     * Test SQLite database connection
-     */
     private async testSQLiteConnection(): Promise<void> {
         const path = this.plugin.settings.sqliteDatabasePath.trim();
         
         if (!path) {
-            this.showNotice('No SQLite database path configured. Using mock data.', 'info');
+            this.showNotice('❌ No SQLite database path configured. Please enter a database path.', 'error');
             return;
         }
 
-        this.showNotice('Testing SQLite connection...', 'info');
+        this.showNotice('🔄 Testing SQLite connection...', 'info');
         
         try {
-            // Create temporary engine for testing
-            const testEngine = new SQLiteQueryEngine(this.plugin.logger, this.app);
-            await testEngine.initialize(path);
-            
-            // Test with a simple query
-            await testEngine.executeSelectQuery('SELECT 1 as test', {});
+            const testEngine = new SQLiteQueryEngine(this.plugin.logger);
+            const success = await testEngine.initialize(path);
             testEngine.cleanup();
             
-            this.showNotice('✅ SQLite connection successful!', 'success');
+            if (success) {
+                this.showNotice('✅ SQLite connection successful!', 'success');
+            } else {
+                this.showNotice('❌ SQLite connection failed. Check path and file permissions.', 'error');
+            }
         } catch (error) {
             this.showNotice(`❌ SQLite connection failed: ${error.message}`, 'error');
         }
     }
 
-    /**
-     * Test Neo4j database connection
-     */
     private async testNeo4jConnection(): Promise<void> {
         const path = this.plugin.settings.neo4jDatabasePath.trim();
         
         if (!path) {
-            this.showNotice('No Neo4j connection configured. Using mock data.', 'info');
+            this.showNotice('❌ No Neo4j connection configured. Please enter a connection string.', 'error');
             return;
         }
 
-        this.showNotice('Testing Neo4j connection...', 'info');
+        this.showNotice('🔄 Testing Neo4j connection...', 'info');
         
         try {
-            // Create temporary engine for testing
-            const testEngine = new Neo4jQueryEngine(this.plugin.logger, this.app);
-            await testEngine.initialize(path);
-            
-            // Test with a simple query
-            await testEngine.executeCypherQuery('RETURN 1 as test', {});
+            const testEngine = new Neo4jQueryEngine(this.plugin.logger);
+            const success = await testEngine.initialize(path);
             testEngine.cleanup();
             
-            this.showNotice('✅ Neo4j connection successful!', 'success');
+            if (success) {
+                this.showNotice('✅ Neo4j connection successful!', 'success');
+            } else {
+                this.showNotice('❌ Neo4j connection failed. Check connection string and database status.', 'error');
+            }
         } catch (error) {
             this.showNotice(`❌ Neo4j connection failed: ${error.message}`, 'error');
         }
     }
 
-    /**
-     * Show notice to user
-     */
     private showNotice(message: string, type: 'info' | 'success' | 'error'): void {
-        // Create a temporary notice element
         const notice = document.createElement('div');
         notice.style.cssText = `
             position: fixed;
             top: 50px;
             right: 20px;
-            padding: 10px 15px;
-            border-radius: 5px;
+            padding: 12px 16px;
+            border-radius: 6px;
             color: white;
             font-weight: 500;
             z-index: 1000;
-            max-width: 300px;
+            max-width: 400px;
             word-wrap: break-word;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            font-size: 14px;
+            line-height: 1.4;
             background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
         `;
         notice.textContent = message;
         
         document.body.appendChild(notice);
         
-        // Remove after 3 seconds
         setTimeout(() => {
             if (notice.parentNode) {
                 notice.parentNode.removeChild(notice);
             }
-        }, 3000);
+        }, 5000);
     }
 }
