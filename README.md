@@ -1,94 +1,365 @@
-# Obsidian Sample Plugin
+# Obsidian Database Plugin
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+Execute **SQL and Cypher queries** directly in your Obsidian notes using code blocks. A powerful dual-database plugin supporting both **SQLite (relational)** and **Neo4j (graph)** databases for comprehensive data analysis.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+## Features
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open Sample Modal" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+✅ **Dual Database Support** - Both SQLite and Neo4j in one plugin  
+✅ **SQL Code Block Execution** - Write SQL in `sql` or `sqlite` code blocks  
+✅ **Cypher Code Block Execution** - Write Cypher in `neo4j` or `cypher` code blocks  
+✅ **Rich Result Display** - HTML tables for SQL, graph visualizations for Cypher  
+✅ **Robust Error Handling** - Clear error messages with helpful suggestions  
+✅ **Performance Monitoring** - Query execution times and result counts  
+✅ **Development Ready** - Comprehensive logging and debugging support  
 
-## First time developing plugins?
+## Quick Start
 
-Quick starting guide for new plugin devs:
+### SQLite Queries (Relational Data)
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+````markdown
+```sql
+SELECT * FROM books WHERE rating > 4.0
+```
+````
 
-## Releasing new releases
+### Neo4j Queries (Graph Data)
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+````markdown
+```cypher
+MATCH (p:Person)-[r:WORKS_FOR]->(c:Company)
+RETURN p.name, c.name, r.role
+```
+````
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+## Usage Examples
 
-## Adding your plugin to the community plugin list
+### SQLite (Relational Database)
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+#### Basic Query
+````markdown
+```sql
+SELECT name, author, rating FROM books ORDER BY rating DESC LIMIT 5
+```
+````
 
-## How to use
+#### Aggregation
+````markdown
+```sql
+SELECT author, COUNT(*) as book_count, AVG(rating) as avg_rating
+FROM books 
+GROUP BY author 
+HAVING book_count > 1
+```
+````
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+#### Filtered Results
+````markdown
+```sql
+SELECT * FROM books WHERE year >= 2020 AND rating > 4.0
+```
+````
 
-## Manually installing the plugin
+### Neo4j (Graph Database)
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+#### Basic Node Query
+````markdown
+```cypher
+MATCH (p:Person) 
+RETURN p.name, p.age, p.city
+```
+````
 
-## Improve code quality with eslint (optional)
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- To use eslint with this project, make sure to install eslint from terminal:
-  - `npm install -g eslint`
-- To use eslint to analyze this project use this command:
-  - `eslint main.ts`
-  - eslint will then create a report with suggestions for code improvement by file and line number.
-- If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder:
-  - `eslint .\src\`
+#### Relationship Query
+````markdown
+```cypher
+MATCH (p:Person)-[r:FRIENDS_WITH]->(friend:Person)
+RETURN p.name as person, friend.name as friend, r.since
+```
+````
 
-## Funding URL
+#### Complex Graph Pattern
+````markdown
+```cypher
+MATCH (p:Person)-[:WORKS_FOR]->(c:Company)
+WHERE p.age > 25
+RETURN c.name, COUNT(p) as employee_count
+ORDER BY employee_count DESC
+```
+````
 
-You can include funding URLs where people who use your plugin can financially support it.
+#### Graph Structure Overview
+````markdown
+```cypher
+MATCH (n)-[r]->(m)
+RETURN DISTINCT labels(n) as from_labels, type(r) as relationship, labels(m) as to_labels
+```
+````
 
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
+## Current Status
 
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
+**Phase 1: Dual Database Query Engine** ✅
+
+This release provides core functionality for both databases:
+
+### SQLite Features ✅
+- ✅ SQL code block processing (`sql`, `sqlite`)
+- ✅ SELECT query execution with filtering, sorting, grouping
+- ✅ Table result rendering
+- ✅ Mock relational data (books, authors, ratings)
+
+### Neo4j Features ✅
+- ✅ Cypher code block processing (`neo4j`, `cypher`)
+- ✅ MATCH query execution with patterns and filtering
+- ✅ Graph visualization (nodes and relationships)
+- ✅ Table result rendering for property queries
+- ✅ Mock graph data (people, companies, books, relationships)
+
+**Future Phases:**
+- 📋 Real database connections (better-sqlite3, neo4j-driver)
+- 📋 Metadata extraction from Markdown files
+- 📋 Database building from vault content
+- 📋 Advanced SQL/Cypher operations (write operations)
+- 📋 Interactive graph visualizations
+- 📋 Custom database schemas
+
+## Database Integration
+
+The plugin supports multiple connection strategies for both databases:
+
+### SQLite Integration
+1. **Existing obsidian-sqlite3 Plugin** (Recommended)
+2. **Test Database** (Development) - Built-in relational sample data
+3. **Direct Integration** (Future) - Bundle better-sqlite3 directly
+
+### Neo4j Integration
+1. **Test Graph Database** (Development) - Built-in graph sample data
+2. **Neo4j Driver Integration** (Future) - Direct connection to Neo4j instances
+3. **Embedded Graph Database** (Future) - Local graph storage
+
+## Sample Data
+
+### SQLite Sample Data (Books Database)
+- **books** table: id, name, author, year, rating
+- Sample authors: Author A, Author B, Author C
+- Sample books with ratings from 3.5 to 4.9
+- Years from 2021 to 2024
+
+### Neo4j Sample Data (Social Network)
+- **Person** nodes: Alice, Bob, Charlie, Diana (with age, city)
+- **Company** nodes: TechCorp, DataSoft (with industry, founded)
+- **Book** nodes: Graph database books
+- **Relationships**: WORKS_FOR, FRIENDS_WITH, READ (with properties)
+
+## Installation
+
+### Development Installation
+
+1. Clone this repository to your vault's plugins folder:
+   ```bash
+   cd /path/to/vault/.obsidian/plugins
+   git clone https://github.com/yourusername/obsidian-database-plugin
+   cd obsidian-database-plugin
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Build the plugin:
+   ```bash
+   npm run dev
+   ```
+
+4. Enable the plugin in Obsidian settings
+
+### Manual Installation
+
+1. Download the latest release
+2. Extract to `.obsidian/plugins/obsidian-database-plugin/`
+3. Reload Obsidian and enable the plugin
+
+## Architecture
+
+### Core Components
+
+- **Main Plugin Class** (`main.ts`) - Dual database plugin lifecycle and code block registration
+- **SQLite Query Engine** (`sqlite-engine.ts`) - SQL database connections and query execution
+- **Neo4j Query Engine** (`neo4j-engine.ts`) - Graph database connections and Cypher execution
+- **SQL Result Renderer** (`result-renderer.ts`) - HTML table generation for relational data
+- **Graph Result Renderer** (`graph-result-renderer.ts`) - Graph visualization and table display
+- **Logger** (`logger.ts`) - Comprehensive logging and debugging
+
+### Code Block Processing Flow
+
+```
+SQLite: ```sql → Parse SQL → Execute Query → Render Table → Display in Note
+Neo4j:  ```cypher → Parse Cypher → Execute Query → Render Graph → Display in Note
 ```
 
-If you have multiple URLs, you can also do:
+### Supported Code Block Types
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
+- `sql` - SQLite queries
+- `sqlite` - SQLite queries (alternative)
+- `neo4j` - Neo4j Cypher queries
+- `cypher` - Cypher queries (alternative)
+
+## Testing Examples
+
+Create test notes with these query examples:
+
+### SQLite Test Queries
+
+```markdown
+# SQLite Basic Tests
+
+## All Books
+```sql
+SELECT * FROM books
 ```
 
-## API Documentation
+## High-Rated Books
+```sql
+SELECT * FROM books WHERE rating > 4.0 ORDER BY rating DESC
+```
 
-See https://github.com/obsidianmd/obsidian-api
+## Books by Author
+```sql
+SELECT author, COUNT(*) as count, AVG(rating) as avg_rating
+FROM books GROUP BY author
+```
+
+## Error Test
+```sql
+SELECT * FROM nonexistent_table
+```
+```
+
+### Neo4j Test Queries
+
+```markdown
+# Neo4j Basic Tests
+
+## All People
+```cypher
+MATCH (p:Person) RETURN p
+```
+
+## Work Relationships
+```cypher
+MATCH (p:Person)-[r:WORKS_FOR]->(c:Company)
+RETURN p.name, c.name, r.role
+```
+
+## Friend Network
+```cypher
+MATCH (p:Person)-[r:FRIENDS_WITH]->(friend:Person)
+RETURN p.name as person, friend.name as friend
+```
+
+## Complex Pattern
+```cypher
+MATCH (p:Person)-[:WORKS_FOR]->(c:Company)
+WHERE p.age > 30
+RETURN c.name, COUNT(p) as senior_employees
+```
+
+## Error Test
+```cypher
+MATCH (x:NonexistentLabel) RETURN x
+```
+```
+
+## Development
+
+### Prerequisites
+
+- Node.js v16+
+- TypeScript
+- Obsidian development environment
+
+### Building
+
+```bash
+# Development build with hot reload
+npm run dev
+
+# Production build
+npm run build
+```
+
+### Project Structure
+
+```
+obsidian-database-plugin/
+├── main.ts                    # Main plugin class (dual database support)
+├── sqlite-engine.ts           # SQLite query engine
+├── neo4j-engine.ts           # Neo4j query engine  
+├── result-renderer.ts         # SQL result renderer
+├── graph-result-renderer.ts   # Graph result renderer
+├── logger.ts                  # Logging system
+├── styles.css                 # Styling for both SQL tables and graph visualizations
+├── manifest.json              # Plugin metadata
+└── README.md                  # Documentation
+```
+
+### Debugging
+
+The plugin includes comprehensive logging for both databases:
+- Set browser console to show all logs
+- Check for `[DatabasePlugin]` prefixed messages
+- SQLite logs: `[DatabasePlugin:SQLiteEngine]`
+- Neo4j logs: `[DatabasePlugin:Neo4jEngine]`
+- Error details include stack traces and context
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with tests
+4. Submit a pull request
+
+Please ensure:
+- Code follows TypeScript best practices
+- All functions have comprehensive comments
+- Error handling is robust for both databases
+- Changes are backward compatible
+
+## Roadmap
+
+### Version 0.2.0 - Real Database Connections
+- Integrate better-sqlite3 for SQLite
+- Integrate neo4j-driver for Neo4j
+- Support external database connections
+
+### Version 0.3.0 - Metadata Integration
+- Extract frontmatter and tags from vault files
+- Build databases from markdown metadata
+- Advanced relationship queries
+
+### Version 0.4.0 - Advanced Features
+- Interactive graph visualizations
+- Custom database schemas
+- Data import/export
+- Query templates and snippets
+
+### Version 1.0.0 - Production Ready
+- Full SQL and Cypher operation support
+- Performance optimizations
+- Comprehensive documentation
+
+## Known Issues
+
+1. **Database Dependencies**: Currently uses mock data. Real database drivers planned for future versions.
+
+2. **Read-Only Operations**: Currently only SELECT (SQL) and MATCH (Cypher) queries are supported for security.
+
+3. **Large Result Sets**: Results are limited to 1000 rows/records by default to prevent UI freezing.
+
+## License
+
+MIT License - see LICENSE file for details.
+
+---
+
+*Built with ❤️ for the Obsidian community - bridging relational and graph databases*
