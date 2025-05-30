@@ -143,19 +143,26 @@ export default class DatabasePlugin extends Plugin {
         // Initialize SQLite engine if enabled
         if (this.settings.enableSQLite) {
             try {
-                this.sqliteEngine = new SQLiteQueryEngine(this.logger, this.app);
-                
-                // Pass database path if provided, otherwise use mock data
-                const dbPath = this.settings.sqliteDatabasePath.trim() || undefined;
-                await this.sqliteEngine.initialize(dbPath);
-                
-                this.logger.info('SQLite engine initialized successfully', { 
-                    configuredPath: dbPath || 'none',
-                    hasExternalPath: !!dbPath
+                // Initialize SQLite engine
+                const sqliteSuccess = await this.sqliteEngine.initialize(this.settings.sqlitePath);
+                if (!sqliteSuccess) {
+                    this.logger.warn('SQLite engine using mock data');
+                }
+
+                // Initialize Neo4j engine  
+                const neo4jSuccess = await this.neo4jEngine.initialize(this.settings.neo4jConnectionString);
+                if (!neo4jSuccess) {
+                    this.logger.warn('Neo4j engine using mock data');
+                }
+
+                this.logger.info('Database engines initialized', {
+                    sqlite: sqliteSuccess ? 'external' : 'mock',
+                    neo4j: neo4jSuccess ? 'external' : 'mock'
                 });
+
             } catch (error) {
-                this.logger.error('Failed to initialize SQLite engine', error);
-                this.sqliteEngine = null;
+                this.logger.error('Failed to initialize database engines', { error });
+                throw error;
             }
         } else {
             this.logger.info('SQLite engine disabled in settings');
