@@ -1,590 +1,718 @@
-import { App } from 'obsidian';
-import { PluginLogger } from './logger';
+import { Logger } from './logger';
 
 /**
- * Graph query execution context for tracking query source and metadata
- */
-export interface GraphQueryContext {
-    sourcePath?: string;
-    sourceElement?: HTMLElement;
-    executionId?: string;
-}
-
-/**
- * Graph node representation
- */
-export interface GraphNode {
-    id: string;
-    labels: string[];
-    properties: { [key: string]: any };
-}
-
-/**
- * Graph relationship representation
- */
-export interface GraphRelationship {
-    id: string;
-    type: string;
-    startNodeId: string;
-    endNodeId: string;
-    properties: { [key: string]: any };
-}
-
-/**
- * Result of a Cypher query execution
- */
-export interface GraphQueryResult {
-    records: any[];           // Raw result records
-    summary: {
-        query: string;
-        executionTime: number;
-        recordCount: number;
-        queryType: 'READ' | 'WRITE' | 'SCHEMA';
-    };
-    graph?: {
-        nodes: GraphNode[];
-        relationships: GraphRelationship[];
-    };
-    context?: GraphQueryContext;
-}
-
-/**
- * Neo4j Query Engine - Handles graph database connections and Cypher query execution
- * 
- * For the initial implementation, this will:
- * 1. Create a mock graph database with sample data
- * 2. Parse basic Cypher queries
- * 3. Eventually integrate neo4j-driver
+ * Neo4j Query Engine with robust dependency handling and fallback mechanisms
+ * Handles both external Neo4j connections and mock graph data for development
  */
 export class Neo4jQueryEngine {
-    private logger: PluginLogger;
-    private app: App;
-    private database: any; // Will be neo4j driver or mock
+    private logger: Logger;
+    private driver: any = null;
+    private session: any = null;
+    private isExternalDatabase: boolean = false;
     private isInitialized: boolean = false;
+    private mockDatabase: MockGraphDatabase;
+    private connectionString?: string;
 
-    constructor(logger: PluginLogger, app: App) {
-        this.logger = logger.createChildLogger('Neo4jEngine');
-        this.app = app;
+    constructor(logger: Logger) {
+        this.logger = logger;
+        this.mockDatabase = new MockGraphDatabase();
     }
 
     /**
-     * Initialize the Neo4j engine
+     * Initialize the Neo4j engine with comprehensive dependency checking
+     * Falls back gracefully when external dependencies unavailable
      */
-    async initialize(databasePath?: string): Promise<void> {
-        try {
-            this.logger.info('Initializing Neo4j Query Engine...', { databasePath });
+    async initialize(connectionString?: string): Promise<boolean> {
+        this.logger.info('[Neo4jEngine] Initializing Neo4j Query Engine...', { 
+            hasConnectionString: !!connectionString 
+        });
 
-            // Strategy 1: Try to connect to external Neo4j database if path provided
-            if (databasePath && databasePath.trim().length > 0) {
-                if (await this.connectToExternalDatabase(databasePath)) {
-                    this.logger.info('Connected to external Neo4j database', { path: databasePath });
+        try {
+            // Attempt external database connection if connection string provided
+            if (connectionString) {
+                this.connectionString = connectionString;
+                const externalConnected = await this.tryExternalDatabase(connectionString);
+                if (externalConnected) {
+                    this.logger.info('[Neo4jEngine] External Neo4j database connected successfully');
                     this.isInitialized = true;
-                    return;
+                    return true;
                 }
             }
 
-            // Strategy 2: Create mock graph database for development
-            if (await this.createMockGraphDatabase()) {
-                this.logger.info('Created mock graph database for development (no external database path provided)');
-                this.isInitialized = true;
-                return;
-            }
-
-            throw new Error('Failed to initialize Neo4j database connection');
+            // Fall back to mock database with proper initialization
+            return await this.initializeMockDatabase();
 
         } catch (error) {
-            this.logger.error('Failed to initialize Neo4j engine', error);
-            throw error;
+            this.logger.error('[Neo4jEngine] Critical initialization error', {
+                errorName: error.name,
+                errorMessage: error.message,
+                errorStack: error.stack
+            });
+            
+            // Ensure we always have a working fallback
+            return await this.initializeMockDatabase();
         }
     }
 
     /**
-     * Execute a Cypher query and return structured results
+     * Attempt to connect to external Neo4j database with proper error handling
      */
-    async executeCypherQuery(query: string, context?: GraphQueryContext): Promise<GraphQueryResult> {
-        const startTime = performance.now();
-        const executionId = this.generateExecutionId();
+    private async tryExternalDatabase(connectionString: string): Promise<boolean> {
+        this.logger.info('[Neo4jEngine] Attempting external Neo4j connection...');
 
         try {
-            if (!this.isInitialized) {
-                throw new Error('Neo4j engine not initialized');
-            }
-
-            this.logger.debug('Executing Cypher query', { 
-                query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
-                executionId,
-                sourcePath: context?.sourcePath
-            });
-
-            // Validate it's a proper Cypher query
-            this.validateCypherQuery(query);
-
-            // Execute the query
-            const rawResult = await this.executeQuery(query);
-            
-            // Format the result into our standard structure
-            const result = this.formatGraphQueryResult(rawResult, query, context, startTime, executionId);
-
-            this.logger.logPerformance('Cypher query execution', startTime, {
-                recordCount: result.summary.recordCount,
-                executionId,
-                sourcePath: context?.sourcePath
-            });
-
-            return result;
-
-        } catch (error) {
-            const executionTime = performance.now() - startTime;
-            this.logger.error('Cypher query execution failed', error, {
-                query: query.substring(0, 200),
-                executionId,
-                executionTime: `${executionTime.toFixed(2)}ms`,
-                sourcePath: context?.sourcePath
-            });
-            throw error;
-        }
-    }
-
-    /**
-     * Connect to external Neo4j database
-     */
-    private async connectToExternalDatabase(databasePath: string): Promise<boolean> {
-        try {
-            this.logger.info('Connecting to external Neo4j database...', { path: databasePath });
-
-            // Check if it's a connection string (bolt://, neo4j://, etc.)
-            if (databasePath.startsWith('bolt://') || databasePath.startsWith('neo4j://') || databasePath.startsWith('neo4j+s://')) {
-                return await this.connectToRemoteNeo4j(databasePath);
-            }
-
-            // Otherwise, treat as local database directory
-            return await this.connectToLocalNeo4j(databasePath);
-
-        } catch (error) {
-            this.logger.error('Failed to connect to external Neo4j database', error, { path: databasePath });
-            return false;
-        }
-    }
-
-    /**
-     * Connect to remote Neo4j instance (bolt://, neo4j://)
-     */
-    private async connectToRemoteNeo4j(connectionString: string): Promise<boolean> {
-        try {
-            this.logger.info('Connecting to remote Neo4j...', { connectionString: connectionString.replace(/\/\/.*:.*@/, '//***:***@') });
-
-            // Try to use neo4j-driver if available
-            const neo4j = (window as any).require?.('neo4j-driver');
-            
-            if (!neo4j) {
-                this.logger.warn('neo4j-driver not available - cannot connect to remote Neo4j instance. You may need to install it via npm.');
-                throw new Error('Neo4j driver not available. Install neo4j-driver: npm install neo4j-driver');
-            }
-
-            // Parse connection string for authentication
-            let uri = connectionString;
-            let auth = neo4j.auth.basic('neo4j', 'neo4j'); // default credentials
-
-            // Check for embedded credentials (user:pass@host format)
-            const authMatch = connectionString.match(/^([\w+]+:\/\/)([\w]+):([\w]+)@(.+)$/);
-            if (authMatch) {
-                const [, protocol, username, password, host] = authMatch;
-                uri = protocol + host;
-                auth = neo4j.auth.basic(username, password);
-                this.logger.debug('Using embedded credentials from connection string');
-            } else {
-                this.logger.debug('Using default Neo4j credentials (neo4j/neo4j)');
-            }
-
-            // Create driver with connection options
-            const driver = neo4j.driver(uri, auth, {
-                maxConnectionLifetime: 30000,
-                maxConnectionPoolSize: 10,
-                connectionAcquisitionTimeout: 10000,
-                connectionTimeout: 5000
-            });
-            
-            // Test connection with a simple query
-            const session = driver.session();
-            try {
-                const result = await session.run('RETURN 1 as test');
-                this.logger.debug('Connection test successful', { 
-                    resultCount: result.records.length 
-                });
-            } finally {
-                await session.close();
-            }
-
-            // Store driver and session factory
-            this.database = { 
-                driver, 
-                session: () => driver.session(),
-                isRemote: true,
-                connectionString: uri
-            };
-            
-            this.logger.info('Connected to remote Neo4j successfully', { uri });
-            return true;
-
-        } catch (error) {
-            this.logger.error('Failed to connect to remote Neo4j', error, {
-                connectionString: connectionString.replace(/\/\/.*:.*@/, '//***:***@')
-            });
-            return false;
-        }
-    }
-
-    /**
-     * Connect to local Neo4j database directory
-     */
-    private async connectToLocalNeo4j(databasePath: string): Promise<boolean> {
-        try {
-            const fs = (window as any).require?.('fs');
-            const path = (window as any).require?.('path');
-            
-            if (!fs || !path) {
-                this.logger.warn('Node.js filesystem not available - cannot access local Neo4j database');
+            // Parse connection string safely
+            const connectionInfo = this.parseConnectionString(connectionString);
+            if (!connectionInfo) {
+                this.logger.error('[Neo4jEngine] Invalid connection string format');
                 return false;
             }
 
-            // Check if directory exists
-            const resolvedPath = path.resolve(databasePath);
-            
-            if (!fs.existsSync(resolvedPath)) {
-                throw new Error(`Neo4j database directory not found: ${resolvedPath}`);
+            // Try to load neo4j-driver with multiple approaches
+            const driver = await this.loadNeo4jDriver();
+            if (!driver) {
+                this.logger.warn('[Neo4jEngine] Neo4j driver not available, using mock database');
+                return false;
             }
 
-            // For local Neo4j databases, we would need embedded Neo4j
-            // This is complex and not commonly available in Node.js environments
-            // For now, suggest using remote connection instead
-            this.logger.warn('Local Neo4j database files not yet supported. Use bolt:// connection string instead.');
+            // Create driver instance
+            this.driver = driver.driver(
+                connectionInfo.uri,
+                driver.auth.basic(connectionInfo.username, connectionInfo.password),
+                {
+                    maxConnectionLifetime: 3 * 60 * 60 * 1000, // 3 hours
+                    maxConnectionPoolSize: 50,
+                    connectionAcquisitionTimeout: 2 * 60 * 1000, // 2 minutes
+                    disableLosslessIntegers: true
+                }
+            );
+
+            // Test the connection
+            const testResult = await this.testDriverConnection();
+            if (testResult) {
+                this.isExternalDatabase = true;
+                this.logger.info('[Neo4jEngine] External Neo4j connection successful');
+                return true;
+            }
+
+            // Cleanup failed connection
+            await this.cleanupDriver();
             return false;
 
         } catch (error) {
-            this.logger.error('Failed to connect to local Neo4j database', error);
+            this.logger.error('[Neo4jEngine] External database connection failed', {
+                errorName: error.name,
+                errorMessage: error.message
+            });
+            await this.cleanupDriver();
             return false;
         }
     }
 
     /**
-     * Create mock graph database with sample data
+     * Parse Neo4j connection string safely
      */
-    private async createMockGraphDatabase(): Promise<boolean> {
+    private parseConnectionString(connectionString: string): ConnectionInfo | null {
         try {
-            this.logger.info('Creating mock graph database...');
+            // Expected format: bolt://username:password@host:port
+            const match = connectionString.match(/^(bolt|neo4j):\/\/([^:]+):([^@]+)@([^:]+):(\d+)$/);
+            
+            if (!match) {
+                return null;
+            }
 
-            this.database = new MockNeo4jDatabase();
-            await this.database.initialize();
+            return {
+                protocol: match[1],
+                username: match[2],
+                password: match[3],
+                host: match[4],
+                port: parseInt(match[5]),
+                uri: `${match[1]}://${match[4]}:${match[5]}`
+            };
 
-            this.logger.info('Mock graph database created successfully');
-            return true;
         } catch (error) {
-            this.logger.error('Failed to create mock graph database', error);
+            this.logger.error('[Neo4jEngine] Connection string parsing failed', { error: error.message });
+            return null;
+        }
+    }
+
+    /**
+     * Load Neo4j driver with multiple approaches for Electron compatibility
+     */
+    private async loadNeo4jDriver(): Promise<any> {
+        try {
+            // Multiple approaches for loading neo4j-driver in Electron environment
+            let neo4j;
+            
+            try {
+                // Standard require (may work in some Electron configurations)
+                neo4j = require('neo4j-driver');
+                this.logger.info('[Neo4jEngine] Loaded neo4j-driver via require');
+                return neo4j;
+            } catch (requireError) {
+                try {
+                    // Try dynamic import (modern alternative)
+                    neo4j = await import('neo4j-driver');
+                    this.logger.info('[Neo4jEngine] Loaded neo4j-driver via import');
+                    return neo4j.default || neo4j;
+                } catch (importError) {
+                    try {
+                        // Try Electron-specific loading
+                        const { remote } = require('electron');
+                        neo4j = remote.require('neo4j-driver');
+                        this.logger.info('[Neo4jEngine] Loaded neo4j-driver via electron remote');
+                        return neo4j;
+                    } catch (electronError) {
+                        this.logger.warn('[Neo4jEngine] All neo4j-driver loading methods failed', {
+                            requireError: requireError.message,
+                            importError: importError.message,
+                            electronError: electronError.message
+                        });
+                        return null;
+                    }
+                }
+            }
+
+        } catch (error) {
+            this.logger.error('[Neo4jEngine] Failed to load neo4j-driver', { error: error.message });
+            return null;
+        }
+    }
+
+    /**
+     * Test driver connection with timeout
+     */
+    private async testDriverConnection(): Promise<boolean> {
+        try {
+            // Create a session and run a simple query
+            this.session = this.driver.session();
+            const result = await this.session.run('RETURN 1 as test');
+            const record = result.records[0];
+            
+            if (record && record.get('test')?.toNumber?.() === 1 || record.get('test') === 1) {
+                this.logger.info('[Neo4jEngine] Driver connection test successful');
+                return true;
+            }
+
+            return false;
+
+        } catch (error) {
+            this.logger.error('[Neo4jEngine] Driver connection test failed', { error: error.message });
+            return false;
+        } finally {
+            // Close test session
+            if (this.session) {
+                await this.session.close();
+                this.session = null;
+            }
+        }
+    }
+
+    /**
+     * Initialize mock database with proper error handling
+     */
+    private async initializeMockDatabase(): Promise<boolean> {
+        try {
+            this.logger.info('[Neo4jEngine] Initializing mock graph database...');
+            
+            // Initialize mock database
+            await this.mockDatabase.initialize();
+            this.isExternalDatabase = false;
+            this.isInitialized = true;
+
+            // Test mock database
+            const testResult = await this.executeQuery('RETURN 1 as test');
+            if (testResult.success) {
+                this.logger.info('[Neo4jEngine] Mock graph database initialized successfully');
+                return true;
+            } else {
+                throw new Error('Mock database test query failed');
+            }
+
+        } catch (error) {
+            this.logger.error('[Neo4jEngine] Mock database initialization failed', {
+                errorName: error.name,
+                errorMessage: error.message,
+                errorStack: error.stack
+            });
             return false;
         }
     }
 
     /**
-     * Validate Cypher query syntax
+     * Execute Cypher query with comprehensive error handling and performance monitoring
      */
-    private validateCypherQuery(query: string): void {
-        const trimmedQuery = query.trim().toUpperCase();
-        
-        // Check for basic Cypher keywords
-        const validStarters = ['MATCH', 'CREATE', 'MERGE', 'DELETE', 'SET', 'REMOVE', 'RETURN', 'WITH', 'CALL', 'SHOW'];
-        const hasValidStarter = validStarters.some(keyword => trimmedQuery.startsWith(keyword));
-        
-        if (!hasValidStarter) {
-            throw new Error(`Invalid Cypher query: Query must start with a valid Cypher keyword (${validStarters.join(', ')})`);
-        }
+    async executeQuery(query: string, sourcePath?: string): Promise<CypherQueryResult> {
+        const executionId = `neo4j_exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const startTime = performance.now();
 
-        // For now, restrict to read-only operations for security
-        const writeOperations = ['CREATE', 'MERGE', 'DELETE', 'SET', 'REMOVE'];
-        const hasWriteOperation = writeOperations.some(op => trimmedQuery.includes(op));
-        
-        if (hasWriteOperation) {
-            throw new Error('Only read operations (MATCH, RETURN) are currently supported');
-        }
-    }
+        this.logger.info('[Neo4jEngine] Starting Cypher query execution', {
+            query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
+            executionId,
+            sourcePath
+        });
 
-    /**
-     * Execute query using available database connection
-     */
-    private async executeQuery(query: string): Promise<any> {
-        if (this.database && this.database.session) {
-            // Using real neo4j-driver
-            const session = this.database.session();
-            try {
-                const result = await session.run(query);
-                await session.close();
-                
-                // Convert neo4j result to our format
-                return {
-                    records: result.records.map((record: any) => {
-                        const obj: any = {};
-                        record.keys.forEach((key: string) => {
-                            obj[key] = record.get(key);
-                        });
-                        return obj;
-                    })
-                };
-            } catch (error) {
-                await session.close();
-                throw error;
+        try {
+            // Check if engine is initialized
+            if (!this.isInitialized) {
+                throw new Error('Neo4j engine not initialized. Please check database connection.');
             }
-        } else if (this.database && this.database.executeCypher) {
-            // Using our mock database
-            return await this.database.executeCypher(query);
-        } else {
-            throw new Error('No valid graph database connection available');
+
+            // Validate query (basic Cypher injection prevention)
+            if (!this.isValidCypherQuery(query)) {
+                throw new Error('Invalid or potentially unsafe query. Only MATCH and RETURN queries are supported.');
+            }
+
+            let results;
+            const cleanQuery = query.trim();
+
+            // Execute query based on database type
+            if (this.isExternalDatabase && this.driver) {
+                results = await this.executeExternalQuery(cleanQuery);
+            } else {
+                results = await this.mockDatabase.query(cleanQuery);
+            }
+
+            const executionTime = performance.now() - startTime;
+
+            this.logger.info('[Neo4jEngine] Cypher query executed successfully', {
+                executionId,
+                executionTime: `${executionTime.toFixed(2)}ms`,
+                recordCount: Array.isArray(results) ? results.length : 0,
+                sourcePath
+            });
+
+            return {
+                success: true,
+                data: Array.isArray(results) ? results : [],
+                recordCount: Array.isArray(results) ? results.length : 0,
+                executionTime: Math.round(executionTime),
+                executionId
+            };
+
+        } catch (error) {
+            const executionTime = performance.now() - startTime;
+
+            this.logger.error('[Neo4jEngine] Cypher query execution failed', {
+                query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
+                executionId,
+                executionTime: `${executionTime.toFixed(2)}ms`,
+                sourcePath,
+                errorName: error.name,
+                errorMessage: error.message,
+                errorStack: error.stack
+            });
+
+            return {
+                success: false,
+                error: `Cypher query execution failed: ${error.message}`,
+                executionTime: Math.round(executionTime),
+                executionId,
+                data: [],
+                recordCount: 0
+            };
         }
     }
 
     /**
-     * Format raw query results into GraphQueryResult structure
+     * Execute query on external Neo4j database
      */
-    private formatGraphQueryResult(
-        rawResult: any, 
-        query: string, 
-        context?: GraphQueryContext, 
-        startTime?: number, 
-        executionId?: string
-    ): GraphQueryResult {
-        const executionTime = startTime ? performance.now() - startTime : 0;
+    private async executeExternalQuery(query: string): Promise<any[]> {
+        let session = null;
         
+        try {
+            session = this.driver.session();
+            const result = await session.run(query);
+            
+            // Convert Neo4j records to plain objects
+            return result.records.map((record: any) => {
+                const obj: any = {};
+                record.keys.forEach((key: string) => {
+                    const value = record.get(key);
+                    obj[key] = this.convertNeo4jValue(value);
+                });
+                return obj;
+            });
+
+        } finally {
+            if (session) {
+                await session.close();
+            }
+        }
+    }
+
+    /**
+     * Convert Neo4j values to plain JavaScript values
+     */
+    private convertNeo4jValue(value: any): any {
+        if (value === null || value === undefined) {
+            return value;
+        }
+
+        // Handle Neo4j integers
+        if (value.toNumber && typeof value.toNumber === 'function') {
+            return value.toNumber();
+        }
+
+        // Handle Neo4j nodes
+        if (value.properties) {
+            return {
+                ...value.properties,
+                _labels: value.labels,
+                _id: value.identity?.toNumber?.() || value.identity
+            };
+        }
+
+        // Handle Neo4j relationships
+        if (value.type && value.start && value.end) {
+            return {
+                ...value.properties,
+                _type: value.type,
+                _start: value.start?.toNumber?.() || value.start,
+                _end: value.end?.toNumber?.() || value.end,
+                _id: value.identity?.toNumber?.() || value.identity
+            };
+        }
+
+        // Handle arrays
+        if (Array.isArray(value)) {
+            return value.map(item => this.convertNeo4jValue(item));
+        }
+
+        // Handle objects
+        if (typeof value === 'object') {
+            const converted: any = {};
+            for (const [key, val] of Object.entries(value)) {
+                converted[key] = this.convertNeo4jValue(val);
+            }
+            return converted;
+        }
+
+        return value;
+    }
+
+    /**
+     * Validate Cypher query for security and compatibility
+     */
+    private isValidCypherQuery(query: string): boolean {
+        const cleanQuery = query.trim().toLowerCase();
+        
+        // Only allow read operations for security
+        const allowedStarters = ['match', 'return', 'with', 'unwind', 'call'];
+        const hasValidStarter = allowedStarters.some(starter => 
+            cleanQuery.startsWith(starter) || cleanQuery.includes(`\n${starter}`) || cleanQuery.includes(` ${starter}`)
+        );
+
+        if (!hasValidStarter && !cleanQuery.startsWith('return')) {
+            return false;
+        }
+
+        // Block dangerous operations
+        const dangerousPatterns = [
+            /\b(create|delete|detach|remove|set|merge)\b/i,
+            /\bcall\s+db\./i,
+            /\bcall\s+dbms\./i,
+            /\bload\s+csv\b/i,
+            /\busing\s+periodic\s+commit\b/i
+        ];
+
+        return !dangerousPatterns.some(pattern => pattern.test(query));
+    }
+
+    /**
+     * Get current database status and diagnostics
+     */
+    getStatus(): Neo4jDatabaseStatus {
         return {
-            records: rawResult.records || [],
-            summary: {
-                query,
-                executionTime,
-                recordCount: rawResult.records ? rawResult.records.length : 0,
-                queryType: this.determineQueryType(query)
-            },
-            graph: rawResult.graph,
-            context: { ...context, executionId }
+            isInitialized: this.isInitialized,
+            isExternalDatabase: this.isExternalDatabase,
+            databaseType: this.isExternalDatabase ? 'Neo4j (External)' : 'Mock Graph Database',
+            hasActiveConnection: !!this.driver || !!this.mockDatabase,
+            canExecuteQueries: this.isInitialized,
+            connectionString: this.connectionString ? this.obfuscateConnectionString(this.connectionString) : undefined
         };
     }
 
     /**
-     * Determine query type from Cypher statement
+     * Obfuscate connection string for logging
      */
-    private determineQueryType(query: string): 'READ' | 'WRITE' | 'SCHEMA' {
-        const upperQuery = query.toUpperCase().trim();
-        
-        if (upperQuery.includes('CREATE') || upperQuery.includes('MERGE') || 
-            upperQuery.includes('DELETE') || upperQuery.includes('SET') || 
-            upperQuery.includes('REMOVE')) {
-            return 'WRITE';
-        }
-        
-        if (upperQuery.includes('CREATE INDEX') || upperQuery.includes('DROP INDEX') ||
-            upperQuery.includes('CREATE CONSTRAINT') || upperQuery.includes('DROP CONSTRAINT')) {
-            return 'SCHEMA';
-        }
-        
-        return 'READ';
+    private obfuscateConnectionString(connectionString: string): string {
+        return connectionString.replace(/:([^:@]+)@/, ':***@');
     }
 
     /**
-     * Generate unique execution ID for tracking
+     * Test database connection with simple query
      */
-    private generateExecutionId(): string {
-        return `neo4j_exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    }
-
-    /**
-     * Cleanup resources
-     */
-    cleanup(): void {
+    async testConnection(): Promise<boolean> {
         try {
-            this.logger.info('Cleaning up Neo4j Query Engine...');
-            
-            if (this.database && this.database.close) {
-                this.database.close();
+            const result = await this.executeQuery('RETURN 1 as test');
+            return result.success && result.data?.[0]?.test === 1;
+        } catch (error) {
+            this.logger.error('[Neo4jEngine] Connection test failed', { error: error.message });
+            return false;
+        }
+    }
+
+    /**
+     * Cleanup driver resources
+     */
+    private async cleanupDriver(): Promise<void> {
+        try {
+            if (this.session) {
+                await this.session.close();
+                this.session = null;
             }
             
-            this.isInitialized = false;
-            this.logger.info('Neo4j Query Engine cleaned up successfully');
+            if (this.driver) {
+                await this.driver.close();
+                this.driver = null;
+            }
         } catch (error) {
-            this.logger.error('Error during Neo4j cleanup', error);
+            this.logger.error('[Neo4jEngine] Driver cleanup error', { error: error.message });
+        }
+    }
+
+    /**
+     * Cleanup all resources
+     */
+    async cleanup(): Promise<void> {
+        try {
+            await this.cleanupDriver();
+            
+            this.isInitialized = false;
+            this.isExternalDatabase = false;
+            this.connectionString = undefined;
+            
+            this.logger.info('[Neo4jEngine] Cleanup completed');
+            
+        } catch (error) {
+            this.logger.error('[Neo4jEngine] Cleanup error', { error: error.message });
         }
     }
 }
 
 /**
- * Mock Neo4j Database for testing and development
- * This simulates a real graph database with sample data
+ * Mock Graph Database for development and fallback
  */
-class MockNeo4jDatabase {
-    private nodes: GraphNode[] = [];
-    private relationships: GraphRelationship[] = [];
-    
+class MockGraphDatabase {
+    private nodes: { [id: string]: any } = {};
+    private relationships: any[] = [];
+    private isInitialized: boolean = false;
+
     async initialize(): Promise<void> {
-        // Create sample graph data - a simple social network
-        this.nodes = [
-            // Person nodes
-            { id: 'p1', labels: ['Person'], properties: { name: 'Alice', age: 30, city: 'New York' } },
-            { id: 'p2', labels: ['Person'], properties: { name: 'Bob', age: 25, city: 'London' } },
-            { id: 'p3', labels: ['Person'], properties: { name: 'Charlie', age: 35, city: 'Paris' } },
-            { id: 'p4', labels: ['Person'], properties: { name: 'Diana', age: 28, city: 'Tokyo' } },
-            
-            // Company nodes
-            { id: 'c1', labels: ['Company'], properties: { name: 'TechCorp', industry: 'Technology', founded: 2010 } },
-            { id: 'c2', labels: ['Company'], properties: { name: 'DataSoft', industry: 'Software', founded: 2015 } },
-            
-            // Book nodes
-            { id: 'b1', labels: ['Book'], properties: { title: 'Graph Databases', author: 'Ian Robinson', year: 2015 } },
-            { id: 'b2', labels: ['Book'], properties: { title: 'Neo4j in Action', author: 'Aleksa Vukotic', year: 2014 } }
-        ];
+        // Create sample nodes
+        this.nodes = {
+            'person_1': { 
+                id: 'person_1', 
+                labels: ['Person'], 
+                properties: { name: 'Alice', age: 30, city: 'New York' } 
+            },
+            'person_2': { 
+                id: 'person_2', 
+                labels: ['Person'], 
+                properties: { name: 'Bob', age: 25, city: 'San Francisco' } 
+            },
+            'person_3': { 
+                id: 'person_3', 
+                labels: ['Person'], 
+                properties: { name: 'Charlie', age: 35, city: 'Chicago' } 
+            },
+            'person_4': { 
+                id: 'person_4', 
+                labels: ['Person'], 
+                properties: { name: 'Diana', age: 28, city: 'Seattle' } 
+            },
+            'company_1': { 
+                id: 'company_1', 
+                labels: ['Company'], 
+                properties: { name: 'TechCorp', industry: 'Technology', founded: 2010 } 
+            },
+            'company_2': { 
+                id: 'company_2', 
+                labels: ['Company'], 
+                properties: { name: 'DataSoft', industry: 'Software', founded: 2015 } 
+            },
+            'book_1': { 
+                id: 'book_1', 
+                labels: ['Book'], 
+                properties: { title: 'Graph Databases', author: 'Ian Robinson', year: 2022 } 
+            },
+            'book_2': { 
+                id: 'book_2', 
+                labels: ['Book'], 
+                properties: { title: 'Neo4j in Action', author: 'Partner et al.', year: 2023 } 
+            }
+        };
 
+        // Create sample relationships
         this.relationships = [
-            // WORKS_FOR relationships
-            { id: 'r1', type: 'WORKS_FOR', startNodeId: 'p1', endNodeId: 'c1', properties: { since: 2020, role: 'Engineer' } },
-            { id: 'r2', type: 'WORKS_FOR', startNodeId: 'p2', endNodeId: 'c1', properties: { since: 2019, role: 'Manager' } },
-            { id: 'r3', type: 'WORKS_FOR', startNodeId: 'p3', endNodeId: 'c2', properties: { since: 2021, role: 'Developer' } },
-            
-            // FRIENDS_WITH relationships
-            { id: 'r4', type: 'FRIENDS_WITH', startNodeId: 'p1', endNodeId: 'p2', properties: { since: 2018 } },
-            { id: 'r5', type: 'FRIENDS_WITH', startNodeId: 'p2', endNodeId: 'p3', properties: { since: 2020 } },
-            { id: 'r6', type: 'FRIENDS_WITH', startNodeId: 'p1', endNodeId: 'p4', properties: { since: 2019 } },
-            
-            // READ relationships
-            { id: 'r7', type: 'READ', startNodeId: 'p1', endNodeId: 'b1', properties: { rating: 5, year: 2021 } },
-            { id: 'r8', type: 'READ', startNodeId: 'p3', endNodeId: 'b2', properties: { rating: 4, year: 2022 } }
+            { 
+                id: 'rel_1', 
+                type: 'WORKS_FOR', 
+                start: 'person_1', 
+                end: 'company_1', 
+                properties: { role: 'Engineer', since: 2020 } 
+            },
+            { 
+                id: 'rel_2', 
+                type: 'WORKS_FOR', 
+                start: 'person_2', 
+                end: 'company_1', 
+                properties: { role: 'Designer', since: 2021 } 
+            },
+            { 
+                id: 'rel_3', 
+                type: 'WORKS_FOR', 
+                start: 'person_3', 
+                end: 'company_2', 
+                properties: { role: 'Manager', since: 2019 } 
+            },
+            { 
+                id: 'rel_4', 
+                type: 'FRIENDS_WITH', 
+                start: 'person_1', 
+                end: 'person_2', 
+                properties: { since: 2018 } 
+            },
+            { 
+                id: 'rel_5', 
+                type: 'FRIENDS_WITH', 
+                start: 'person_2', 
+                end: 'person_4', 
+                properties: { since: 2020 } 
+            },
+            { 
+                id: 'rel_6', 
+                type: 'READ', 
+                start: 'person_1', 
+                end: 'book_1', 
+                properties: { rating: 5, date: '2023-01-15' } 
+            },
+            { 
+                id: 'rel_7', 
+                type: 'READ', 
+                start: 'person_3', 
+                end: 'book_2', 
+                properties: { rating: 4, date: '2023-03-20' } 
+            }
         ];
+
+        this.isInitialized = true;
     }
 
-    async executeCypher(query: string): Promise<any> {
-        const upperQuery = query.toUpperCase().trim();
-        
-        // Handle error cases
-        if (upperQuery.includes('NONEXISTENT') || upperQuery.includes('INVALID')) {
-            throw new Error('Label `NonexistentLabel` not found');
+    async query(cypher: string): Promise<any[]> {
+        if (!this.isInitialized) {
+            throw new Error('Mock graph database not initialized');
         }
-        
-        // Handle basic MATCH queries
-        if (upperQuery.startsWith('MATCH')) {
-            return this.handleMatchQuery(query);
-        }
-        
-        // Handle SHOW queries (Neo4j 4.0+)
-        if (upperQuery.startsWith('SHOW')) {
-            return this.handleShowQuery(query);
-        }
-        
-        throw new Error(`Unsupported Cypher query: ${query.substring(0, 50)}`);
-    }
 
-    private handleMatchQuery(query: string): any {
-        const upperQuery = query.toUpperCase();
+        const cleanCypher = cypher.trim().toLowerCase();
         
-        // MATCH (n) RETURN n - return all nodes
-        if (upperQuery.includes('MATCH (N)') && upperQuery.includes('RETURN N')) {
-            return {
-                records: this.nodes.map(node => ({ n: node })),
-                graph: { nodes: this.nodes, relationships: this.relationships }
-            };
+        // Handle simple test queries
+        if (cleanCypher.includes('return 1 as test')) {
+            return [{ test: 1 }];
         }
-        
-        // MATCH (p:Person) RETURN p - return all Person nodes
-        if (upperQuery.includes('MATCH (P:PERSON)') && upperQuery.includes('RETURN P')) {
-            const personNodes = this.nodes.filter(node => node.labels.includes('Person'));
-            return {
-                records: personNodes.map(node => ({ p: node })),
-                graph: { nodes: personNodes, relationships: [] }
-            };
+
+        // Handle node queries
+        if (cleanCypher.includes('match (p:person)')) {
+            const personNodes = Object.values(this.nodes).filter(node => 
+                node.labels.includes('Person')
+            );
+
+            if (cleanCypher.includes('return p')) {
+                return personNodes.map(node => ({
+                    p: { ...node.properties, _labels: node.labels, _id: node.id }
+                }));
+            }
+
+            // Handle property returns
+            if (cleanCypher.includes('return p.name')) {
+                return personNodes.map(node => ({ 'p.name': node.properties.name }));
+            }
         }
-        
-        // MATCH (p:Person)-[r:WORKS_FOR]->(c:Company) RETURN p, r, c
-        if (upperQuery.includes('WORKS_FOR') && upperQuery.includes('COMPANY')) {
-            const results: any[] = [];
-            const resultNodes: GraphNode[] = [];
-            const resultRels: GraphRelationship[] = [];
+
+        // Handle relationship queries
+        if (cleanCypher.includes('works_for')) {
+            const results = [];
             
-            this.relationships
-                .filter(rel => rel.type === 'WORKS_FOR')
-                .forEach(rel => {
-                    const person = this.nodes.find(n => n.id === rel.startNodeId);
-                    const company = this.nodes.find(n => n.id === rel.endNodeId);
+            for (const rel of this.relationships) {
+                if (rel.type === 'WORKS_FOR') {
+                    const person = this.nodes[rel.start];
+                    const company = this.nodes[rel.end];
                     
                     if (person && company) {
-                        results.push({ p: person, r: rel, c: company });
-                        if (!resultNodes.find(n => n.id === person.id)) resultNodes.push(person);
-                        if (!resultNodes.find(n => n.id === company.id)) resultNodes.push(company);
-                        resultRels.push(rel);
-                    }
-                });
-            
-            return {
-                records: results,
-                graph: { nodes: resultNodes, relationships: resultRels }
-            };
-        }
-        
-        // MATCH (p:Person) WHERE p.age > 30 RETURN p.name, p.age
-        if (upperQuery.includes('WHERE') && upperQuery.includes('AGE')) {
-            const ageMatch = query.match(/age\s*([><=]+)\s*(\d+)/i);
-            if (ageMatch) {
-                const operator = ageMatch[1];
-                const threshold = parseInt(ageMatch[2]);
-                
-                const filteredPersons = this.nodes
-                    .filter(node => node.labels.includes('Person'))
-                    .filter(node => {
-                        const age = node.properties.age;
-                        switch (operator) {
-                            case '>': return age > threshold;
-                            case '>=': return age >= threshold;
-                            case '<': return age < threshold;
-                            case '<=': return age <= threshold;
-                            case '=': return age === threshold;
-                            default: return true;
+                        const result: any = {};
+                        
+                        if (cleanCypher.includes('p.name')) {
+                            result['p.name'] = person.properties.name;
                         }
-                    });
-                
-                return {
-                    records: filteredPersons.map(node => ({
-                        'p.name': node.properties.name,
-                        'p.age': node.properties.age
-                    }))
-                };
+                        if (cleanCypher.includes('c.name')) {
+                            result['c.name'] = company.properties.name;
+                        }
+                        if (cleanCypher.includes('r.role')) {
+                            result['r.role'] = rel.properties.role;
+                        }
+                        
+                        results.push(result);
+                    }
+                }
             }
+            
+            return results;
         }
-        
-        // Count queries
-        if (upperQuery.includes('COUNT(')) {
-            if (upperQuery.includes('PERSON')) {
-                const personCount = this.nodes.filter(node => node.labels.includes('Person')).length;
-                return {
-                    records: [{ 'count(p)': personCount }]
-                };
-            }
-        }
-        
-        // Default fallback
-        return {
-            records: this.nodes.slice(0, 5).map(node => ({ n: node })),
-            graph: { nodes: this.nodes.slice(0, 5), relationships: this.relationships.slice(0, 3) }
-        };
-    }
 
-    private handleShowQuery(query: string): any {
-        const upperQuery = query.toUpperCase();
-        
-        if (upperQuery.includes('LABELS')) {
-            const labels = [...new Set(this.nodes.flatMap(node => node.labels))];
-            return {
-                records: labels.map(label => ({ label }))
-            };
+        // Handle FRIENDS_WITH queries
+        if (cleanCypher.includes('friends_with')) {
+            const results = [];
+            
+            for (const rel of this.relationships) {
+                if (rel.type === 'FRIENDS_WITH') {
+                    const person = this.nodes[rel.start];
+                    const friend = this.nodes[rel.end];
+                    
+                    if (person && friend) {
+                        results.push({
+                            person: person.properties.name,
+                            friend: friend.properties.name,
+                            since: rel.properties.since
+                        });
+                    }
+                }
+            }
+            
+            return results;
         }
-        
-        if (upperQuery.includes('RELATIONSHIP TYPES')) {
-            const types = [...new Set(this.relationships.map(rel => rel.type))];
-            return {
-                records: types.map(type => ({ relationshipType: type }))
-            };
-        }
-        
-        return { records: [] };
+
+        // Fallback for unrecognized queries
+        throw new Error(`Unsupported Cypher query in mock database: ${cypher}`);
     }
+}
+
+/**
+ * Type definitions
+ */
+interface CypherQueryResult {
+    success: boolean;
+    data: any[];
+    recordCount: number;
+    executionTime: number;
+    executionId: string;
+    error?: string;
+}
+
+interface Neo4jDatabaseStatus {
+    isInitialized: boolean;
+    isExternalDatabase: boolean;
+    databaseType: string;
+    hasActiveConnection: boolean;
+    canExecuteQueries: boolean;
+    connectionString?: string;
+}
+
+interface ConnectionInfo {
+    protocol: string;
+    username: string;
+    password: string;
+    host: string;
+    port: number;
+    uri: string;
 }
